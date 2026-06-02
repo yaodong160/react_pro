@@ -1,0 +1,31 @@
+{
+  "name": "@chiko-admin/scripts",
+  "version": "1.0.0",
+  "bin": {
+    "cka": "./bin.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./src/*"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/yargs": "17.0.33",
+    "bumpp": "10.2.3",
+    "c12": "3.2.0",
+    "cac": "6.7.14",
+    "consola": "3.4.2",
+    "enquirer": "2.4.1",
+    "execa": "9.6.0",
+    "kolorist": "1.8.0",
+    "npm-check-updates": "18.0.2",
+    "rimraf": "6.0.1",
+    "tsx": "^4.20.4",
+    "yargs": "18.0.0"
+  }
+}

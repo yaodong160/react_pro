@@ -1,0 +1,196 @@
+.heroBanner {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  background: #f8fafc;
+  color: #1e293b;
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 2;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.heroLogo {
+  margin-bottom: 2rem;
+  display: flex;
+  justify-content: center;
+}
+
+.logoSvg {
+  width: 100px;
+  height: 100px;
+  color: white;
+  filter: drop-shadow(0 4px 8px rgba(255, 255, 255, 0.3));
+}
+
+.logoImg {
+  width: 100px;
+  height: 100px;
+  filter: drop-shadow(0 4px 8px rgba(255, 255, 255, 0.3));
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.buttons .button {
+  border-radius: 8px;
+  font-weight: 500;
+  padding: 0.875rem 1.75rem;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  min-width: 160px;
+  text-align: center;
+}
+
+.buttons .button--primary {
+  background: var(--ifm-color-primary);
+  color: white !important;
+  border: 1px solid var(--ifm-color-primary);
+}
+
+.buttons .button--primary:hover {
+  background: var(--ifm-color-primary-dark);
+  border-color: var(--ifm-color-primary-dark);
+  transform: translateY(-1px);
+  color: white !important;
+}
+
+.buttons .button--secondary {
+  background: transparent;
+  color: var(--ifm-color-primary) !important;
+  border: 1px solid var(--ifm-color-primary);
+}
+
+.buttons .button--secondary:hover {
+  background: var(--ifm-color-primary);
+  border-color: var(--ifm-color-primary);
+  transform: translateY(-1px);
+  color: white !important;
+}
+
+.quickStartBtn {
+  background: var(--ifm-color-primary) !important;
+  color: white !important;
+  border: 1px solid var(--ifm-color-primary) !important;
+}
+
+.quickStartBtn:hover {
+  background: var(--ifm-color-primary-dark) !important;
+  color: white !important;
+  border-color: var(--ifm-color-primary-dark) !important;
+}
+
+.githubBtn {
+  background: transparent !important;
+  color: var(--ifm-color-primary) !important;
+  border: 1px solid var(--ifm-color-primary) !important;
+}
+
+.githubBtn:hover {
+  background: var(--ifm-color-primary) !important;
+  color: white !important;
+  border-color: var(--ifm-color-primary) !important;
+}
+
+.techStack {
+  padding: 6rem 0;
+  background: white;
+}
+
+.sectionTitle {
+  text-align: center;
+  margin-bottom: 4rem;
+  font-size: 2.5rem;
+  color: var(--ifm-color-primary);
+  font-weight: 700;
+  position: relative;
+}
+
+.sectionTitle::after {
+  content: '';
+  position: absolute;
+  bottom: -1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 3px;
+  background: var(--ifm-color-primary);
+  border-radius: 2px;
+}
+
+.techGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.techItem {
+  background: #f8fafc;
+  padding: 1.75rem;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  border: 1px solid #e2e8f0;
+}
+
+.techItem:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: var(--ifm-color-primary);
+}
+
+.techIcon {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  display: block;
+  color: var(--ifm-color-primary);
+}
+
+.techItem h3 {
+  color: var(--ifm-color-primary);
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.techItem p {
+  color: #64748b;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+[data-theme='dark'] {
+  color: #94a3b8;
+
+  .techStack {
+    background: #1e293b;
+  }
+
+  .heroBanner {
+    background: #334155;
+    color: white;
+  }
+
+  .techItem {
+    background: #334155;
+    border-color: #475569;
+  }
+}

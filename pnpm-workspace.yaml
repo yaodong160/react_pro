@@ -1,0 +1,5 @@
+packages:
+  - packages/*
+
+patchedDependencies:
+  '@amnstak/react-image-annotate@0.0.26': patches/@amnstak__react-image-annotate@0.0.26.patch

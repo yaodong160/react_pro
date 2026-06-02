@@ -1,0 +1,89 @@
+diff --git a/dist/ImageViewer.js b/dist/ImageViewer.js
+index 4fbfd712b59c18f3280a17a41e4892dfa726bff7..03798afe4ebeebc712e6d861c196ffbb98c32ef8 100644
+--- a/dist/ImageViewer.js
++++ b/dist/ImageViewer.js
+@@ -19,9 +19,20 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
+   dragging: L
+ }) => {
+   const c = S({ x: 0, y: 0 }), I = S({ x: 0, y: 0 }), j = (e, t) => {
+-    const [o, x] = [t.x, t.y];
+-    let h = typeof e == "object" ? e.to / r.a : 1 + 0.2 * e;
+-    r.translate(o, x).scaleU(h), r.a > 2 && r.scaleU(2 / r.a), r.a < 0.05 && r.scaleU(0.05 / r.a), r.translate(-o, -x), l(r.clone());
++    // 以鼠标在画布上的位置为缩放中心
++    const [mx, my] = [t.x, t.y];
++    let targetScale = typeof e == "object" ? e.to / r.a : 1 + 0.1 * e;
++    // 限制缩放范围
++    const currentScale = r.a;
++    const newScale = currentScale * targetScale;
++    if (newScale > 2) targetScale = 2 / currentScale;
++    if (newScale < 0.05) targetScale = 0.05 / currentScale;
++    // 获取当前鼠标位置的图像坐标，确保缩放后该点不动
++    const invMat = r.clone().inverse();
++    const imgPt = invMat.applyToPoint(mx, my);
++    // 缩放：先平移使图像点对齐到鼠标，再缩放，再平移回去
++    r.translate(mx, my).scaleU(targetScale).translate(-mx, -my);
++    l(r.clone());
+   };
+   return { mouseEvents: {
+     onMouseMove: (e) => {
+@@ -85,6 +96,7 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
+       }
+     },
+     onWheel: (e) => {
++      e.preventDefault();
+       const t = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+       j(t, c.current);
+     },
+@@ -281,7 +293,7 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
+       style: {
+         width: "100%",
+         height: "100%",
+-        maxHeight: "calc(100vh - 68px)",
++        maxHeight: "none",
+         position: "relative",
+         overflow: "hidden",
+         cursor: o ? "grabbing" : "grab"
+diff --git a/dist/lib.js b/dist/lib.js
+index acd3e2accddab5519c664052b047c3b5e9362e46..99e68c60dd869863c5b136e7cd04683c01bb3489 100644
+--- a/dist/lib.js
++++ b/dist/lib.js
+@@ -4122,9 +4122,18 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
+   dragging: g
+ }) => {
+   const k = li({ x: 0, y: 0 }), S = li({ x: 0, y: 0 }), O = (A, T) => {
+-    const [L, K] = [T.x, T.y];
+-    let N = typeof A == "object" ? A.to / d.a : 1 + 0.2 * A;
+-    d.translate(L, K).scaleU(N), d.a > 2 && d.scaleU(2 / d.a), d.a < 0.05 && d.scaleU(0.05 / d.a), d.translate(-L, -K), t(d.clone());
++    const [mx, my] = [T.x, T.y];
++    let targetScale = typeof A == "object" ? A.to / d.a : 1 + 0.1 * A;
++    const currentScale = d.a;
++    const newScale = currentScale * targetScale;
++    var maxScale = 3;
++    if (l.current && l.current.iw && l.current.canvasWidth) {
++      var computedMax = l.current.canvasWidth / l.current.iw;
++      maxScale = computedMax > 3 ? 3 : (computedMax > 1.5 ? computedMax : 1.5);
++    }
++    if (newScale > maxScale) { targetScale = maxScale / currentScale; }
++    if (newScale < 0.05) targetScale = 0.05 / currentScale;
++    d.translate(mx, my).scaleU(targetScale).translate(-mx, -my);
++    t(d.clone());
+   };
+   return { mouseEvents: {
+     onMouseMove: (A) => {
+@@ -4192,6 +4203,7 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
+       }
+     },
+     onWheel: (A) => {
++      A.preventDefault();
+       const T = A.deltaY > 0 ? 1 : A.deltaY < 0 ? -1 : 0;
+       O(T, k.current);
+     },
+@@ -4715,7 +4727,7 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
+       style: {
+         width: "100%",
+         height: "100%",
+-        maxHeight: "calc(100vh - 68px)",
++        maxHeight: "none",
+         position: "relative",
+         overflow: "hidden",
+         cursor: d ? "crosshair" : de ? "grabbing" : u ? "grab" : f ? lt.a < 1 ? "zoom-out" : "zoom-in" : void 0
