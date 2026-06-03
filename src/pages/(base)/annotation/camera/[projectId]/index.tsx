@@ -10,6 +10,7 @@
 
 import { fetchCameraCapture, fetchCameraCheck, fetchCameraPtz, fetchCameraResolutions, fetchSetCameraResolution } from '@/services/api';
 import { globalConfig } from '@/config';
+import { localStg } from '@/utils/storage';
 
 /** 将后端返回的相对路径拼接为完整图片URL */
 function resolveImageUrl(url: string) {
@@ -25,9 +26,8 @@ function resolveImageUrl(url: string) {
 const CameraCapture = () => {
   const { t } = useTranslation();
   const nav = useNavigate();
-  const { projectId: paramProjectId } = useParams<{ projectId: string }>();
-
-  const projectId = Number(paramProjectId);
+  const { projectid } = useParams<{ projectid: string }>();
+  const projectId = Number(projectid);
 
   // 连通状态
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -177,8 +177,128 @@ const CameraCapture = () => {
     nav('/annotation/collect');
   };
 
-  // MJPEG 预览地址
-  const previewUrl = `/api/camera/preview/${projectId}`;
+  // MJPEG 预览 - 通过 fetch 带 token 获取流，逐帧渲染
+  const imgRef = useRef<HTMLImageElement>(null);
+  const mjpegAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!connected) {
+      // 断开连接时清理
+      if (mjpegAbortRef.current) {
+        mjpegAbortRef.current.abort();
+        mjpegAbortRef.current = null;
+      }
+      if (imgRef.current) {
+        imgRef.current.src = '';
+      }
+      return;
+    }
+
+    const abortController = new AbortController();
+    mjpegAbortRef.current = abortController;
+
+    const token = localStg.get('token');
+    const serviceBaseURL = globalConfig.serviceBaseURL;
+
+    fetch(`${serviceBaseURL}/camera/preview/${projectId}`, {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : ''
+      },
+      signal: abortController.signal
+    })
+      .then(async (response) => {
+        if (!response.ok || !response.body) {
+          console.error('[Camera] MJPEG fetch failed:', response.status);
+          return;
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        const reader = response.body.getReader();
+
+        // 如果是 MJPEG 流 (multipart/x-mixed-replace)，逐帧解析
+        if (contentType.includes('multipart/x-mixed-replace')) {
+          const boundary = contentType.match(/boundary=([^;]+)/)?.[1] || '';
+          const boundaryBuffer = new TextEncoder().encode(`--${boundary}`);
+          let buffer = new Uint8Array(0);
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            // 拼接 buffer
+            const newBuffer = new Uint8Array(buffer.length + value.length);
+            newBuffer.set(buffer);
+            newBuffer.set(value, buffer.length);
+            buffer = newBuffer;
+
+            // 查找完整帧（以 boundary 分隔）
+            let startIdx = 0;
+            while (startIdx < buffer.length) {
+              const boundaryIdx = indexOf(buffer, boundaryBuffer, startIdx + boundaryBuffer.length);
+              if (boundaryIdx === -1) {
+                break;
+              }
+
+              // 提取两 boundary 之间的数据
+              const frameData = buffer.slice(startIdx, boundaryIdx);
+
+              // 查找 JPEG 数据起始 (headers 后空行)
+              const jpegStart = indexOf(frameData, new Uint8Array([0xFF, 0xD8]));
+              if (jpegStart !== -1) {
+                const blob = new Blob([frameData.slice(jpegStart)], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                if (imgRef.current) {
+                  const prevUrl = imgRef.current.src;
+                  imgRef.current.src = url;
+                  // 释放上一个 blob URL
+                  if (prevUrl && prevUrl.startsWith('blob:')) {
+                    URL.revokeObjectURL(prevUrl);
+                  }
+                }
+              }
+
+              startIdx = boundaryIdx;
+            }
+
+            // 保留未完成的数据
+            if (startIdx > 0) {
+              buffer = buffer.slice(startIdx);
+            }
+          }
+        } else {
+          // 单张图片 (如 mock 模式)
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          if (imgRef.current) {
+            imgRef.current.src = url;
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.error('[Camera] MJPEG stream error:', err);
+        }
+      });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [connected, projectId]);
+
+  // 辅助函数：在 Uint8Array 中查找子数组
+  function indexOf(haystack: Uint8Array, needle: Uint8Array, fromIndex = 0) {
+    outer: for (let i = fromIndex; i <= haystack.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (haystack[i + j] !== needle[j]) {
+          continue outer;
+        }
+      }
+      return i;
+    }
+    return -1;
+  }
 
   return (
     <div className="h-full flex-col overflow-hidden">
@@ -233,9 +353,9 @@ const CameraCapture = () => {
             <div className="flex-center flex-1 overflow-hidden">
               {connected ? (
                 <img
+                  ref={imgRef}
                   alt="Camera Preview"
                   className="max-h-full max-w-full object-contain"
-                  src={previewUrl}
                 />
               ) : (
                 <div className="text-text-secondary text-center text-14px">
