@@ -400,12 +400,31 @@ export class H264Player {
       // 检查这个 segment 是否包含 moov（含有 codec 信息）
       const hasMoov = containsMoov(view);
       if (hasMoov) {
-        // 完整 init segment: ftyp + moov，直接使用
-        console.log(`[H264Player] 首个 segment 是完整 init segment (ftyp+moov, 大小:${  view.byteLength  }), 直接使用`);
+        // 完整 init segment: ftyp + moov，从 moov 中提取 SPS/PPS 来确定 codec
+        console.log(`[H264Player] 首个 segment 是完整 init segment (ftyp+moov, 大小:${  view.byteLength  })`);
+
+        // 从 moov 的 avcC box 中提取 SPS/PPS
+        const avcC = extractAvcCFromMoov(view);
+        if (avcC) {
+          const sps = extractSpsFromAvcC(avcC);
+          const pps = extractPpsFromAvcC(avcC);
+          if (sps && pps) {
+            this.codecString = buildCodecString(sps);
+            this.initSegment = data;  // 直接使用完整 ftyp+moov 作为 init segment
+            console.log('[H264Player] 从 moov 中提取 codec:', this.codecString);
+          } else {
+            console.warn('[H264Player] moov 存在但无法提取 SPS/PPS');
+          }
+        } else {
+          console.warn('[H264Player] moov 存在但无法找到 avcC box');
+        }
+
         this.initReady = true;
         this.pendingChunks.push(data);
-        if (this.sourceBuffer && !this.sourceBuffer.updating) {
-          this.flushPendingChunks();
+
+        // 如果 codec 已就绪且 MediaSource 已打开，立即初始化 SourceBuffer
+        if (this.codecString && this.mediaSource?.readyState === 'open') {
+          this.initSourceBuffer();
         }
       } else {
         // 只有 ftyp，没有 moov，无法获取 codec 信息
