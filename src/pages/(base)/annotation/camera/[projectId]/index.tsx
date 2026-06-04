@@ -10,7 +10,7 @@
 
 import { fetchCameraCapture, fetchCameraCheck, fetchCameraPtz, fetchCameraResolutions, fetchSetCameraResolution } from '@/services/api';
 import { globalConfig } from '@/config';
-import { localStg } from '@/utils/storage';
+import { H264Player } from '@/utils/h264-player';
 
 /** 将后端返回的相对路径拼接为完整图片URL */
 function resolveImageUrl(url: string) {
@@ -54,10 +54,15 @@ const CameraCapture = () => {
     setConnectError('');
     try {
       const res = await fetchCameraCheck(projectId);
-      setConnected(true);
+      const isConnected = res.data?.connected ?? false;
+      setConnected(isConnected);
       setDeviceName(res.data?.deviceName || '');
-      // 连通后加载分辨率
-      loadResolutions();
+      if (isConnected) {
+        loadResolutions();
+        shouldStartPlayerRef.current = true;
+      } else {
+        setConnectError(t('page.annotation.camera.connectFailed'));
+      }
     } catch (e: any) {
       setConnected(false);
       setConnectError(e?.message || t('common.error'));
@@ -99,8 +104,8 @@ const CameraCapture = () => {
     }
     try {
       await fetchCameraPtz(projectId, params);
-    } catch {
-      // ignore
+    } catch (e: any) {
+      console.warn('[PTZ] 请求失败:', action, e?.message);
     }
   };
 
@@ -161,6 +166,7 @@ const CameraCapture = () => {
 
   // 关闭连接
   const handleDisconnect = () => {
+    stopH264Player();
     setConnected(null);
     setDeviceName('');
     setResolutions([]);
@@ -177,128 +183,67 @@ const CameraCapture = () => {
     nav('/annotation/collect');
   };
 
-  // MJPEG 预览 - 通过 fetch 带 token 获取流，逐帧渲染
-  const imgRef = useRef<HTMLImageElement>(null);
-  const mjpegAbortRef = useRef<AbortController | null>(null);
+  // H.264 视频播放
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<H264Player | null>(null);
+  // 标记：checkConnection 成功后需要启动 player
+  const shouldStartPlayerRef = useRef(false);
 
+  // 当 connected 变为 true 且 video 元素存在时，启动 H.264 播放
   useEffect(() => {
-    if (!connected) {
-      // 断开连接时清理
-      if (mjpegAbortRef.current) {
-        mjpegAbortRef.current.abort();
-        mjpegAbortRef.current = null;
-      }
-      if (imgRef.current) {
-        imgRef.current.src = '';
-      }
+    if (!connected || !shouldStartPlayerRef.current) {
+      return;
+    }
+    shouldStartPlayerRef.current = false;
+
+    const video = videoRef.current;
+    if (!video || playerRef.current) {
       return;
     }
 
-    const abortController = new AbortController();
-    mjpegAbortRef.current = abortController;
-
-    const token = localStg.get('token');
-    const serviceBaseURL = globalConfig.serviceBaseURL;
-
-    fetch(`${serviceBaseURL}/camera/preview/${projectId}`, {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : ''
+    console.log('[Camera] 启动 H264Player');
+    const player = new H264Player({
+      projectId,
+      onError: (msg) => {
+        window.$message?.error(msg);
+        setConnected(false);
+        setConnectError(msg);
       },
-      signal: abortController.signal
-    })
-      .then(async (response) => {
-        if (!response.ok || !response.body) {
-          console.error('[Camera] MJPEG fetch failed:', response.status);
-          return;
+      onStatusChange: (status) => {
+        if (status === 'connected') {
+          setConnected(true);
         }
-
-        const contentType = response.headers.get('content-type') || '';
-        const reader = response.body.getReader();
-
-        // 如果是 MJPEG 流 (multipart/x-mixed-replace)，逐帧解析
-        if (contentType.includes('multipart/x-mixed-replace')) {
-          const boundary = contentType.match(/boundary=([^;]+)/)?.[1] || '';
-          const boundaryBuffer = new TextEncoder().encode(`--${boundary}`);
-          let buffer = new Uint8Array(0);
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              break;
-            }
-
-            // 拼接 buffer
-            const newBuffer = new Uint8Array(buffer.length + value.length);
-            newBuffer.set(buffer);
-            newBuffer.set(value, buffer.length);
-            buffer = newBuffer;
-
-            // 查找完整帧（以 boundary 分隔）
-            let startIdx = 0;
-            while (startIdx < buffer.length) {
-              const boundaryIdx = indexOf(buffer, boundaryBuffer, startIdx + boundaryBuffer.length);
-              if (boundaryIdx === -1) {
-                break;
-              }
-
-              // 提取两 boundary 之间的数据
-              const frameData = buffer.slice(startIdx, boundaryIdx);
-
-              // 查找 JPEG 数据起始 (headers 后空行)
-              const jpegStart = indexOf(frameData, new Uint8Array([0xFF, 0xD8]));
-              if (jpegStart !== -1) {
-                const blob = new Blob([frameData.slice(jpegStart)], { type: 'image/jpeg' });
-                const url = URL.createObjectURL(blob);
-                if (imgRef.current) {
-                  const prevUrl = imgRef.current.src;
-                  imgRef.current.src = url;
-                  // 释放上一个 blob URL
-                  if (prevUrl && prevUrl.startsWith('blob:')) {
-                    URL.revokeObjectURL(prevUrl);
-                  }
-                }
-              }
-
-              startIdx = boundaryIdx;
-            }
-
-            // 保留未完成的数据
-            if (startIdx > 0) {
-              buffer = buffer.slice(startIdx);
-            }
-          }
-        } else {
-          // 单张图片 (如 mock 模式)
-          const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
-          if (imgRef.current) {
-            imgRef.current.src = url;
-          }
+        if (status === 'disconnected') {
+          setConnected(false);
         }
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.error('[Camera] MJPEG stream error:', err);
+        if (status === 'error') {
+          setConnected(false);
         }
-      });
+      }
+    });
+
+    player.attach(video);
+    playerRef.current = player;
 
     return () => {
-      abortController.abort();
+      player.destroy();
+      playerRef.current = null;
     };
   }, [connected, projectId]);
 
-  // 辅助函数：在 Uint8Array 中查找子数组
-  function indexOf(haystack: Uint8Array, needle: Uint8Array, fromIndex = 0) {
-    outer: for (let i = fromIndex; i <= haystack.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) {
-        if (haystack[i + j] !== needle[j]) {
-          continue outer;
-        }
-      }
-      return i;
-    }
-    return -1;
-  }
+  // 停止 H.264 播放
+  const stopH264Player = useCallback(() => {
+    playerRef.current?.destroy();
+    playerRef.current = null;
+    shouldStartPlayerRef.current = false;
+  }, []);
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => {
+      stopH264Player();
+    };
+  }, [stopH264Player]);
 
   return (
     <div className="h-full flex-col overflow-hidden">
@@ -352,9 +297,11 @@ const CameraCapture = () => {
           <div className="flex-col flex-1 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-8px bg-black">
             <div className="flex-center flex-1 overflow-hidden">
               {connected ? (
-                <img
-                  ref={imgRef}
-                  alt="Camera Preview"
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
                   className="max-h-full max-w-full object-contain"
                 />
               ) : (

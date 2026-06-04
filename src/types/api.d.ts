@@ -327,6 +327,7 @@ declare namespace Api {
   namespace Camera {
     /** 摄像头连通性检查结果 */
     type CheckResult = {
+      connected: boolean;
       deviceName: string;
     };
 

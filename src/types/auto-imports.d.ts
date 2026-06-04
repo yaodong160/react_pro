@@ -71,6 +71,7 @@ declare global {
   const Flex: typeof import('antd')['Flex']
   const Form: typeof import('antd')['Form']
   const FullScreen: typeof import('../components/FullScreen')['default']
+  const H264Player: typeof import('../utils/h264-player')['H264Player']
   const IconAntDesignReloadOutlined: typeof import('~icons/ant-design/reload-outlined.tsx')['default']
   const IconAntDesignSettingOutlined: typeof import('~icons/ant-design/setting-outlined.tsx')['default']
   const IconGridiconsFullscreen: typeof import('~icons/gridicons/fullscreen.tsx')['default']
@@ -260,4 +261,7 @@ declare global {
   // @ts-ignore
   export type { ThemeName } from '../hooks/business/usePreferredColorScheme'
   import('../hooks/business/usePreferredColorScheme')
+  // @ts-ignore
+  export type { H264Player, H264PlayerOptions } from '../utils/h264-player'
+  import('../utils/h264-player')
 }

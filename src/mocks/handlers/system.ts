@@ -807,7 +807,7 @@ export const cameraHandlers = [
     return HttpResponse.json({
       code: 0,
       message: '摄像头连接正常',
-      data: { deviceName: `DS-2CD2T47G2-L (项目${projectId})` }
+      data: { connected: true, deviceName: `DS-2CD2T47G2-L (项目${projectId})` }
     });
   }),
 
