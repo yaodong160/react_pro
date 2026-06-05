@@ -26,11 +26,12 @@ export function fetchCameraCapture(projectId: number) {
  * 云台控制
  * POST /api/camera/ptz/:projectId
  */
-export function fetchCameraPtz(projectId: number, params: Api.Camera.PtzParams) {
+export function fetchCameraPtz(projectId: number, params: Api.Camera.PtzParams, signal?: AbortSignal) {
   return request<void>({
     method: 'post',
     url: `/camera/ptz/${projectId}`,
-    data: params
+    data: params,
+    signal
   });
 }
 

@@ -829,10 +829,13 @@ export const cameraHandlers = [
     return HttpResponse.json({
       code: 0,
       data: {
-        imageId: cameraCaptureIdCounter,
+        id: cameraCaptureIdCounter,
         filename,
-        fileUrl,
-        thumbnailUrl
+        file_url: fileUrl,
+        thumbnail_url: thumbnailUrl,
+        file_size: 123456,
+        width: 1920,
+        height: 1080
       }
     });
   }),

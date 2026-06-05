@@ -18,7 +18,6 @@ function buildCodecString(sps: Uint8Array): string {
   const level = sps[3];  // level_idc
   const hex = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
   const codec = `avc1.${hex(profile)}${hex(compat)}${hex(level)}`;
-  console.log('[H264Player] SPS profile:', hex(profile), 'compat:', hex(compat), 'level:', hex(level), '=> codec:', codec);
   return codec;
 }
 
@@ -37,6 +36,7 @@ export class H264Player {
   private initReady = false;
   private initSegment: ArrayBuffer | null = null;
   private codecString: string | null = null;
+  private fragmentCount = 0;
 
   constructor(options: H264PlayerOptions) {
     this.options = options;
@@ -56,19 +56,19 @@ export class H264Player {
     });
 
     video.addEventListener('loadedmetadata', () => {
-      console.log('[H264Player] video loadedmetadata, duration:', video.duration);
+      // video metadata ready
     });
 
     video.addEventListener('canplay', () => {
-      console.log('[H264Player] video canplay, readyState:', video.readyState);
+      // video can start playing
     });
 
     video.addEventListener('playing', () => {
-      console.log('[H264Player] video playing');
+      // video is playing
     });
 
     video.addEventListener('waiting', () => {
-      console.log('[H264Player] video waiting');
+      // video is buffering
     });
 
     this.connectSocket();
@@ -104,7 +104,7 @@ export class H264Player {
     }
     if (this.sourceBuffer) {
       return;
-    } // 已经初始化过了
+    }
 
     try {
       const mime = `video/mp4; codecs="${this.codecString}"`;
@@ -113,7 +113,6 @@ export class H264Player {
         this.options.onError?.(`浏览器不支持编码 ${this.codecString}`);
         return;
       }
-      console.log('[H264Player] 使用 codec:', mime);
       this.sourceBuffer = this.mediaSource.addSourceBuffer(mime);
       this.sourceBuffer.mode = 'sequence';
 
@@ -123,7 +122,6 @@ export class H264Player {
 
       this.sourceBuffer.addEventListener('error', (e) => {
         console.error('[H264Player] SourceBuffer error:', e);
-        // 尝试结束流以防止 MediaSource 永久损坏
         if (this.mediaSource && this.mediaSource.readyState === 'open') {
           try {
             this.mediaSource.endOfStream(); 
@@ -131,14 +129,7 @@ export class H264Player {
         }
       });
 
-      // append init segment
       if (this.initSegment) {
-        const initView = new Uint8Array(this.initSegment);
-        console.log('[H264Player] append init segment, 大小:', initView.byteLength);
-        // 打印 init segment 前 128 字节用于调试
-        const hexDump = Array.from(initView.slice(0, Math.min(128, initView.byteLength)))
-          .map(b => b.toString(16).padStart(2, '0')).join(' ');
-        console.log('[H264Player] init segment hex (前128):', hexDump);
         this.sourceBuffer.appendBuffer(this.initSegment);
       }
     } catch (e) {
@@ -150,52 +141,21 @@ export class H264Player {
     const serverUrl = globalConfig.serviceBaseURL.replace(/\/api$/, '');
     const token = localStg.get('token') || '';
     const namespace = '/ws/camera';
-
-    console.log('[H264Player] 连接 Socket.IO: serverUrl:', serverUrl, 'namespace:', namespace, 'path:', '/socket.io');
-    console.log('[H264Player] 完整 URL:', `${serverUrl}${namespace}`);
+    const socketPath = '/api/socket.io';
 
     this.socket = io(`${serverUrl}${namespace}`, {
-      path: '/socket.io',
-      transports: ['websocket'],
+      path: socketPath,
+      transports: ['websocket', 'polling'],
       auth: { token },
       query: { token }
     });
 
-    // 打印 Socket.IO 内部握手信息（引擎层）
-    this.socket.io.on('open', () => {
-      console.log('[H264Player] 底层 WebSocket 已打开');
-    });
-
     this.socket.on('connect', () => {
-      console.log('[H264Player] Socket.IO 已连接, socket.id:', this.socket?.id);
       this.socketReady = true;
       this.tryStartStream();
     });
 
-    // 监听所有事件用于调试（不过滤，全部打印）
-    this.socket.onAny((event, ...args) => {
-      if (['connect', 'disconnect', 'connect_error'].includes(event)) {
-        return;
-      }
-      // 打印前 256 字节数据用于调试
-      const argInfo = args.map((a: any) => {
-        if (a instanceof ArrayBuffer) {
-          const bytes = new Uint8Array(a, 0, Math.min(a.byteLength, 256));
-          const hex = Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-          return `[Binary ${a.byteLength}bytes, first 16: ${hex}]`;
-        }
-        if (ArrayBuffer.isView(a)) {
-          const view = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
-          const hex = Array.from(view.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-          return `[Binary ${a.byteLength}bytes, first 16: ${hex}]`;
-        }
-        return typeof a === 'object' ? JSON.stringify(a).substring(0, 200) : String(a).substring(0, 200);
-      });
-      console.log('[H264Player] 事件:', event, 'args:', argInfo);
-    });
-
-    this.socket.on('stream_info', (info: any) => {
-      console.log('[H264Player] stream_info:', info);
+    this.socket.on('stream_info', (_info: any) => {
       this.options.onStatusChange?.('connected');
     });
 
@@ -206,36 +166,29 @@ export class H264Player {
       } else if (ArrayBuffer.isView(chunk)) {
         data = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer;
       } else {
-        console.warn('[H264Player] video_data 类型异常:', typeof chunk, chunk);
+        console.warn('[H264Player] video_data 类型异常:', typeof chunk);
         return;
       }
 
-      // 将 chunk 加入分段拼接缓冲区
       this.segmentBuffer.push(new Uint8Array(data));
       this.segmentBufferSize += data.byteLength;
-
-      // 尝试从缓冲区中提取完整的 fMP4 segment
       this.tryExtractSegment();
     });
 
     this.socket.on('stream_end', () => {
-      console.log('[H264Player] stream_end');
       this.options.onStatusChange?.('disconnected');
     });
 
     this.socket.on('error', (data: { message?: string }) => {
-      console.error('[H264Player] Socket error:', data);
       this.options.onError?.(data?.message || '未知错误');
     });
 
-    this.socket.on('disconnect', (reason) => {
-      console.log('[H264Player] Socket disconnect, reason:', reason);
+    this.socket.on('disconnect', (_reason) => {
       this.options.onStatusChange?.('disconnected');
     });
 
     this.socket.on('connect_error', (err) => {
-      console.error('[H264Player] Socket connect_error:', err?.message, err);
-      this.options.onError?.(`Socket.IO 连接失败: ${  err?.message || ''}`);
+      this.options.onError?.(`Socket.IO 连接失败: ${err?.message || ''}`);
     });
   }
 
@@ -305,17 +258,8 @@ export class H264Player {
 
       const totalSegmentSize = boxSize + mdatSize;
       if (this.segmentBufferSize < totalSegmentSize) {
-        // segment 还没收完，继续等待
-        if (this.segmentBuffer.length > 1) {
-          console.log(`[H264Player] 拼接中: buffer=${  this.segmentBufferSize  } 需要=${  totalSegmentSize 
-          } (moof=${  boxSize  } mdat=${  mdatSize  })`);
-        }
         return;
       }
-
-      // segment 完整，提取并处理
-      console.log(`[H264Player] segment 完整: buffer=${  this.segmentBufferSize 
-      } 需要=${  totalSegmentSize  } (moof=${  boxSize  } mdat=${  mdatSize  })`);
 
       const segmentData = combined.buffer.slice(0, totalSegmentSize) as ArrayBuffer;
 
@@ -388,63 +332,41 @@ export class H264Player {
 
   private handleFirstSegment(data: ArrayBuffer) {
     const view = new Uint8Array(data);
-    console.log('[H264Player] 首个 segment, 大小:', view.byteLength);
-
-    // 打印前 64 字节 hex 用于诊断
-    const hexLen = Math.min(view.byteLength, 64);
-    const hex = Array.from(view.slice(0, hexLen)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-    console.log(`[H264Player] 首个 segment hex (前${  hexLen  }字节):`, hex);
 
     // 检查是否是 init segment（以 ftyp 开头）
     if (view.byteLength >= 8 && view[4] === 0x66 && view[5] === 0x74 && view[6] === 0x79 && view[7] === 0x70) {
-      // 检查这个 segment 是否包含 moov（含有 codec 信息）
       const hasMoov = containsMoov(view);
       if (hasMoov) {
-        // 完整 init segment: ftyp + moov，从 moov 中提取 SPS/PPS 来确定 codec
-        console.log(`[H264Player] 首个 segment 是完整 init segment (ftyp+moov, 大小:${  view.byteLength  })`);
-
-        // 从 moov 的 avcC box 中提取 SPS/PPS
         const avcC = extractAvcCFromMoov(view);
         if (avcC) {
           const sps = extractSpsFromAvcC(avcC);
           const pps = extractPpsFromAvcC(avcC);
           if (sps && pps) {
             this.codecString = buildCodecString(sps);
-            this.initSegment = data;  // 直接使用完整 ftyp+moov 作为 init segment
-            console.log('[H264Player] 从 moov 中提取 codec:', this.codecString);
+            this.initSegment = data;
           } else {
-            console.warn('[H264Player] moov 存在但无法提取 SPS/PPS');
+            this.codecString = 'avc1.42E01E';
+            this.initSegment = data;
           }
         } else {
-          console.warn('[H264Player] moov 存在但无法找到 avcC box');
+          this.codecString = 'avc1.42E01E';
+          this.initSegment = data;
         }
-
         this.initReady = true;
-        this.pendingChunks.push(data);
-
-        // 如果 codec 已就绪且 MediaSource 已打开，立即初始化 SourceBuffer
-        if (this.codecString && this.mediaSource?.readyState === 'open') {
-          this.initSourceBuffer();
-        }
+        this.initSourceBuffer();
       } else {
-        // 只有 ftyp，没有 moov，无法获取 codec 信息
-        // 缓存 ftyp，等后续 fragment 到来时提取 SPS/PPS
-        console.log(`[H264Player] 首个 segment 只有 ftyp (无 moov), 大小:${  view.byteLength  } 缓存等待后续数据`);
         this.pendingChunks.push(data);
-        // 不设置 initReady，让后续的 segment 继续走提取逻辑
       }
       return;
     }
 
     // 如果 segment 太小（< 100 字节），可能只是 header/元数据，等下一个
     if (view.byteLength < 100) {
-      console.log(`[H264Player] segment 太小 (${  view.byteLength  } 字节), 可能是 header, 等待下一个 segment`);
       return;
     }
 
     this.initReady = true;
 
-    // 从第一个 fragment 中提取 SPS/PPS 信息来确定 codec
     const result = extractSpsPpsOnly(data);
     if (result) {
       const { sps, pps } = result;
@@ -453,14 +375,9 @@ export class H264Player {
       const { width, height } = parseSpsResolution(sps);
       const init = buildInitManual(avcC, width, height);
       this.initSegment = init.buffer as ArrayBuffer;
-      console.log('[H264Player] 生成 init segment, 大小:', init.byteLength, 'codec:', this.codecString);
-      console.log('[H264Player] 分辨率:', width, 'x', height);
-
-      // 不篡改原始 fragment，直接 append 原数据
       this.pendingChunks.push(data);
       this.initSourceBuffer();
     } else {
-      console.warn('[H264Player] 无法提取 SPS/PPS, 直接 append');
       this.pendingChunks.push(data);
       if (this.sourceBuffer && !this.sourceBuffer.updating) {
         this.flushPendingChunks();
@@ -469,14 +386,19 @@ export class H264Player {
   }
 
   private doAppend(data: ArrayBuffer) {
-    if (this.sourceBuffer && !this.sourceBuffer.updating) {
-      try {
-        this.sourceBuffer.appendBuffer(data);
-      } catch (e) {
-        console.warn('[H264Player] appendBuffer 失败, 放入 pending:', e);
-        this.pendingChunks.push(data);
-      }
-    } else {
+    if (!this.sourceBuffer) {
+      this.pendingChunks.push(data);
+      return;
+    }
+    if (this.sourceBuffer.updating) {
+      this.pendingChunks.push(data);
+      return;
+    }
+    try {
+      this.sourceBuffer.appendBuffer(data);
+      this.fragmentCount++;
+    } catch (e) {
+      console.warn('[H264Player] appendBuffer 失败:', e);
       this.pendingChunks.push(data);
     }
   }
@@ -492,13 +414,10 @@ export class H264Player {
     this.streamStarted = true;
 
     const token = localStg.get('token');
-    console.log('[H264Player] 发送 start_stream, project_id:', this.options.projectId, 'token:', token ? (`${token.substring(0, 10)  }...`) : 'null');
     this.socket.emit('start_stream', {
       project_id: this.options.projectId,
       token
     }, (response: any) => {
-      // Socket.IO 回调确认（ACK）
-      console.log('[H264Player] start_stream ACK:', response);
       if (response?.error) {
         this.options.onError?.(response.error);
       }
@@ -508,14 +427,15 @@ export class H264Player {
     setTimeout(() => {
       if (this.attached && !this.initReady) {
         console.error('[H264Player] 超时：start_stream 后 15 秒未收到视频数据');
-        console.error('[H264Player] 可能原因: 1) 后端未实现 /ws/camera namespace 的 start_stream 事件 2) token无效被静默拒绝 3) 后端视频源未就绪 4) namespace 或 path 配置不匹配');
-        console.error('[H264Player] 当前配置: serverUrl:', globalConfig.serviceBaseURL, 'namespace: /ws/camera, path: /socket.io');
         this.options.onError?.('视频流连接超时：后端未返回视频数据，请检查后端服务');
       }
     }, 15000);
   }
 
   private flushPendingChunks() {
+    if (this.pendingChunks.length === 0) {
+      return;
+    }
     while (this.pendingChunks.length > 0 && this.sourceBuffer && !this.sourceBuffer.updating) {
       try {
         if (this.sourceBuffer.buffered.length > 0) {
@@ -528,14 +448,10 @@ export class H264Player {
         }
 
         const chunk = this.pendingChunks.shift()!;
-        console.log('[H264Player] append media chunk, 大小:', chunk.byteLength, 'pending剩余:', this.pendingChunks.length);
         this.sourceBuffer.appendBuffer(chunk);
 
-        // 尝试播放视频
         if (this.videoElement && this.videoElement.paused) {
-          this.videoElement.play().catch(e => {
-            console.warn('[H264Player] play() 失败:', e);
-          });
+          this.videoElement.play().catch(() => {});
         }
       } catch (e) {
         console.warn('[H264Player] flushPendingChunks 失败:', e);
@@ -652,7 +568,6 @@ function findMdatData(view: Uint8Array): Uint8Array | null {
       // 找到了 "mdat" 标识
       // mdat 的 box size 在前 4 字节（如果 size 为 0 表示延伸到文件末尾）
       const boxSize = (view[i - 4] << 24) | (view[i - 3] << 16) | (view[i - 2] << 8) | view[i - 1];
-      console.log('[H264Player] mdat box, declared size:', boxSize);
       // mdat 数据从标识之后开始
       const dataStart = i + 4;
       // 如果 boxSize 太大（超出 buffer）或为 0，使用 buffer 剩余部分
@@ -682,7 +597,6 @@ function extractSpsPpsFromLengthPrefixed(view: Uint8Array): { sps: Uint8Array; p
     // 合理的 NAL 长度范围
     if (nalLen > 0 && nalLen < 1024 * 1024) {
       const nalType = view[offset] & 0x1f;
-      console.log('[H264Player] 长度前缀 NAL, type:', nalType, 'len:', nalLen);
 
       if (nalType === 7 && !sps) {
         sps = view.slice(offset, offset + nalLen);
@@ -706,7 +620,6 @@ function extractAvcCFromMoov(view: Uint8Array): Uint8Array | null {
       // 前 4 字节应该是 box size
       const size = (view[i - 4] << 24) | (view[i - 3] << 16) | (view[i - 2] << 8) | view[i - 1];
       if (size > 8 && size <= view.length - i + 4) {
-        console.log('[H264Player] 找到 avcC box, size:', size);
         return view.slice(i, i + size - 8);
       }
     }
@@ -764,9 +677,7 @@ function extractPpsFromAvcC(avcC: Uint8Array): Uint8Array | null {
 /** 从 SPS NAL unit 解析宽高（全部使用 bit-level 解析） */
 function parseSpsResolution(sps: Uint8Array): { width: number; height: number } {
   try {
-    // SPS 最小长度：1(nal_header) + 3(profile/constraint/level) + 至少 4 字节
     if (sps.length < 8) {
-      console.warn('[H264Player] SPS 太短:', sps.length);
       return { width: 1920, height: 1080 };
     }
 
@@ -823,7 +734,6 @@ function parseSpsResolution(sps: Uint8Array): { width: number; height: number } 
     // 边界检查
     if (!isFinite(picWidthResult.value) || !isFinite(picHeightResult.value) ||
         picWidthResult.value < 0 || picHeightResult.value < 0) {
-      console.warn('[H264Player] SPS 宽高解析异常, 使用默认分辨率');
       return { width: 1920, height: 1080 };
     }
 
@@ -856,15 +766,8 @@ function parseSpsResolution(sps: Uint8Array): { width: number; height: number } 
     const displayWidth = width - cropUnitX * (cropLeft + cropRight);
     const displayHeight = height - cropUnitY * (cropTop + cropBottom);
 
-    console.log(`[H264Player] SPS: picWidthMbs=${  picWidthResult.value 
-    } picHeightMbs=${  picHeightResult.value 
-    } frameMbsOnly=${  frameMbsOnlyFlag 
-    } crop=${  cropLeft  },${  cropTop  },${  cropRight  },${  cropBottom 
-    } => coded=${  width  }x${  height  } display=${  displayWidth  }x${  displayHeight}`);
-
     return { width: Math.round(displayWidth), height: Math.round(displayHeight) };
-  } catch (e) {
-    console.warn('[H264Player] SPS 解析失败:', e, '使用默认分辨率');
+  } catch {
     return { width: 1920, height: 1080 };
   }
 }
@@ -1012,9 +915,9 @@ function buildInitManual(avcC: Uint8Array, width: number, height: number): Uint8
 
   // moov
   box('moov', () => {
-    // mvhd
+    // mvhd — timescale 与 mdhd 保持一致
     fbox('mvhd', 0, 0, () => {
-      u32(0); u32(0); u32(1000); u32(0);
+      u32(0); u32(0); u32(90000); u32(0);
       u32(0x00010000); u16(0x0100); u16(0);
       u32(0); u32(0);
       // matrix
@@ -1053,9 +956,9 @@ function buildInitManual(avcC: Uint8Array, width: number, height: number): Uint8
 
       // mdia
       box('mdia', () => {
-        // mdhd
+        // mdhd — 使用 H.264 标准 timescale 90000，与后端 moof tfdt 对齐
         fbox('mdhd', 0, 0, () => {
-          u32(0); u32(0); u32(1000); u32(0);
+          u32(0); u32(0); u32(90000); u32(0);
           u16(0x55c4); u16(0);
         });
 
@@ -1136,3 +1039,5 @@ function buildInitManual(avcC: Uint8Array, width: number, height: number): Uint8
 
   return new Uint8Array(buf);
 }
+
+

@@ -37,7 +37,7 @@ const CameraCapture = () => {
 
   // 云台控制
   const [ptzActive, setPtzActive] = useState<string | null>(null);
-  const ptzTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ptzActiveRef = useRef<string | null>(null);
 
   // 分辨率
   const [resolutions, setResolutions] = useState<Api.Camera.Resolution[]>([]);
@@ -59,11 +59,12 @@ const CameraCapture = () => {
       setDeviceName(res.data?.deviceName || '');
       if (isConnected) {
         loadResolutions();
-        shouldStartPlayerRef.current = true;
+        setShouldStartPlayer(true);
       } else {
         setConnectError(t('page.annotation.camera.connectFailed'));
       }
     } catch (e: any) {
+      console.error('[Camera] checkConnection 异常:', e);
       setConnected(false);
       setConnectError(e?.message || t('common.error'));
     } finally {
@@ -84,54 +85,37 @@ const CameraCapture = () => {
     }
   };
 
-  // 清理云台定时器
-  useEffect(() => {
-    return () => {
-      if (ptzTimerRef.current) {
-        clearInterval(ptzTimerRef.current);
-      }
-    };
-  }, []);
-
   // 发送云台指令
-  const sendPtz = async (action: string, isContinuous = false) => {
-    const params: Api.Camera.PtzParams = {
-      action: action as Api.Camera.PtzParams['action'],
-      speed: 5
-    };
-    if (!isContinuous && (action === 'zoomIn' || action === 'zoomOut')) {
-      params.duration = 500;
-    }
-    try {
-      await fetchCameraPtz(projectId, params);
-    } catch (e: any) {
-      console.warn('[PTZ] 请求失败:', action, e?.message);
-    }
+  const sendPtz = (action: string, params?: Partial<Api.Camera.PtzParams>) => {
+    fetchCameraPtz(projectId, { action: action as Api.Camera.PtzParams['action'], speed: 5, ...params })
+      .catch((e: any) => {
+        console.warn('[PTZ] 请求失败:', action, e?.message);
+      });
   };
 
-  // 云台按钮按下（长按连续移动）
+  // 方向键按下：duration=0，后端持续移动不阻塞
   const handlePtzDown = (action: string) => {
+    if (ptzActiveRef.current === action) {
+      return;
+    }
+    ptzActiveRef.current = action;
     setPtzActive(action);
-    sendPtz(action, true);
-    // 持续发送，每 200ms 一次
-    ptzTimerRef.current = setInterval(() => {
-      sendPtz(action, true);
-    }, 200);
+    sendPtz(action, { duration: 0 });
   };
 
-  // 云台按钮松开
+  // 方向键松开：发 stop
   const handlePtzUp = () => {
-    setPtzActive(null);
-    if (ptzTimerRef.current) {
-      clearInterval(ptzTimerRef.current);
-      ptzTimerRef.current = null;
+    if (!ptzActiveRef.current) {
+      return;
     }
+    ptzActiveRef.current = null;
+    setPtzActive(null);
     sendPtz('stop');
   };
 
-  // 变焦点击
+  // 变焦单击：duration=500，后端自动停止
   const handleZoom = (action: 'zoomIn' | 'zoomOut') => {
-    sendPtz(action);
+    sendPtz(action, { duration: 500 });
   };
 
   // 截取当前帧
@@ -143,10 +127,15 @@ const CameraCapture = () => {
     try {
       const res = await fetchCameraCapture(projectId);
       if (res.data) {
-        setCaptures(prev => [res.data!, ...prev]);
+        const captureData = res.data;
+        setCaptures(prev => [captureData, ...prev]);
         window.$message?.success(t('page.annotation.camera.captureSuccess'));
+      } else {
+        console.warn('[Camera] capture 返回空数据, error:', res.error);
+        window.$message?.error(t('common.error'));
       }
-    } catch {
+    } catch (e: any) {
+      console.error('[Camera] capture 异常:', e);
       window.$message?.error(t('common.error'));
     } finally {
       setCapturing(false);
@@ -172,10 +161,7 @@ const CameraCapture = () => {
     setResolutions([]);
     setCurrentResolution(null);
     setCaptures([]);
-    if (ptzTimerRef.current) {
-      clearInterval(ptzTimerRef.current);
-      ptzTimerRef.current = null;
-    }
+    ptzActiveRef.current = null;
   };
 
   // 返回图片采集页
@@ -186,57 +172,51 @@ const CameraCapture = () => {
   // H.264 视频播放
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<H264Player | null>(null);
-  // 标记：checkConnection 成功后需要启动 player
-  const shouldStartPlayerRef = useRef(false);
+  // 用 state 触发启动，确保在 React 渲染完成（video 元素已挂载）后才执行
+  const [shouldStartPlayer, setShouldStartPlayer] = useState(false);
 
-  // 当 connected 变为 true 且 video 元素存在时，启动 H.264 播放
-  useEffect(() => {
-    if (!connected || !shouldStartPlayerRef.current) {
-      return;
-    }
-    shouldStartPlayerRef.current = false;
-
+  // 启动 H.264 播放（与 connected 状态解耦，避免云台操作导致的短暂断开销毁播放器）
+  const startH264Player = useCallback(() => {
     const video = videoRef.current;
     if (!video || playerRef.current) {
       return;
     }
 
-    console.log('[Camera] 启动 H264Player');
     const player = new H264Player({
       projectId,
       onError: (msg) => {
         window.$message?.error(msg);
-        setConnected(false);
         setConnectError(msg);
       },
       onStatusChange: (status) => {
         if (status === 'connected') {
           setConnected(true);
         }
-        if (status === 'disconnected') {
-          setConnected(false);
-        }
-        if (status === 'error') {
-          setConnected(false);
-        }
       }
     });
 
     player.attach(video);
     playerRef.current = player;
-
-    return () => {
-      player.destroy();
-      playerRef.current = null;
-    };
-  }, [connected, projectId]);
+  }, [projectId]);
 
   // 停止 H.264 播放
   const stopH264Player = useCallback(() => {
     playerRef.current?.destroy();
     playerRef.current = null;
-    shouldStartPlayerRef.current = false;
+    setShouldStartPlayer(false);
   }, []);
+
+  // 监听 shouldStartPlayer 状态，在下一帧启动播放器（确保 DOM 就绪）
+  useEffect(() => {
+    if (!shouldStartPlayer) {
+      return;
+    }
+    // 使用 requestAnimationFrame 确保 video 元素已挂载
+    const raf = requestAnimationFrame(() => {
+      startH264Player();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [shouldStartPlayer, startH264Player]);
 
   // 组件卸载时清理
   useEffect(() => {
@@ -326,7 +306,10 @@ const CameraCapture = () => {
               size="small"
               title={t('page.annotation.camera.ptzControl')}
             >
-              <div className="flex-col items-center gap-4px">
+              <div
+                className="flex-col items-center gap-4px"
+                onMouseLeave={handlePtzUp}
+              >
                 <AButton
                   disabled={!connected}
                   className={ptzActive === 'up' ? 'colorPrimary' : ''}
@@ -334,7 +317,6 @@ const CameraCapture = () => {
                   size="large"
                   type={ptzActive === 'up' ? 'primary' : 'default'}
                   onMouseDown={() => handlePtzDown('up')}
-                  onMouseLeave={handlePtzUp}
                   onMouseUp={handlePtzUp}
                 />
                 <div className="flex gap-4px">
@@ -345,7 +327,6 @@ const CameraCapture = () => {
                     size="large"
                     type={ptzActive === 'left' ? 'primary' : 'default'}
                     onMouseDown={() => handlePtzDown('left')}
-                    onMouseLeave={handlePtzUp}
                     onMouseUp={handlePtzUp}
                   />
                   <AButton
@@ -360,7 +341,6 @@ const CameraCapture = () => {
                     size="large"
                     type={ptzActive === 'right' ? 'primary' : 'default'}
                     onMouseDown={() => handlePtzDown('right')}
-                    onMouseLeave={handlePtzUp}
                     onMouseUp={handlePtzUp}
                   />
                 </div>
@@ -371,7 +351,6 @@ const CameraCapture = () => {
                   size="large"
                   type={ptzActive === 'down' ? 'primary' : 'default'}
                   onMouseDown={() => handlePtzDown('down')}
-                  onMouseLeave={handlePtzUp}
                   onMouseUp={handlePtzUp}
                 />
               </div>
@@ -438,28 +417,42 @@ const CameraCapture = () => {
           </div>
         </div>
 
-        {/* 底部采集记录 */}
+        {/* 底部采集记录 — 最大高度占剩余空间 1/8 */}
         {captures.length > 0 && (
-          <div className="border-t border-[var(--ant-color-border-secondary)] px-16px py-8px">
-            <div className="text-text-secondary mb-8px text-12px">
+          <div className="flex-col border-t border-[var(--ant-color-border-secondary)] px-16px py-8px" style={{ maxHeight: '12.5%', minHeight: '80px' }}>
+            <div className="text-text-secondary mb-8px shrink-0 text-12px">
               {t('page.annotation.camera.captureRecords')} · {t('common.total')}: {captures.length}
             </div>
-            <div className="flex gap-8px overflow-x-auto">
-              {captures.map((cap, idx) => (
-                <div
-                  key={cap.imageId || idx}
-                  className="w-120px shrink-0 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-4px"
-                >
-                  <img
-                    alt={cap.filename}
-                    className="aspect-4/3 w-full object-cover"
-                    src={resolveImageUrl(cap.thumbnailUrl || cap.fileUrl)}
-                  />
-                  <div className="text-text-tertiary truncate p-4px text-center text-10px">
-                    {cap.filename}
+            <div className="flex flex-1 items-stretch gap-8px overflow-x-auto pb-4px" style={{ minHeight: 0 }}>
+              {captures.map((cap, idx) => {
+                const rawUrl = cap.thumbnail_url || cap.file_url;
+                const imgSrc = resolveImageUrl(rawUrl);
+                return (
+                  <div
+                    key={cap.id || idx}
+                    className="flex-col shrink-0 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-4px"
+                    style={{ width: 'auto', maxWidth: '120px' }}
+                  >
+                    <div className="relative flex-shrink-0 overflow-hidden bg-gray-100" style={{ aspectRatio: '4/3', height: '100%', width: 'auto' }}>
+                      <img
+                        alt={cap.filename || `capture-${idx}`}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        src={imgSrc}
+                        onError={(e) => {
+                          const el = e.target as HTMLImageElement;
+                          el.style.display = 'none';
+                        }}
+                      />
+                      <div className="text-text-tertiary pointer-events-none absolute inset-0 flex items-center justify-center text-10px">
+                        {cap.filename || `#${cap.id}`}
+                      </div>
+                    </div>
+                    <div className="text-text-tertiary truncate p-2px text-center text-10px leading-tight">
+                      {cap.filename || `#${cap.id}`}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

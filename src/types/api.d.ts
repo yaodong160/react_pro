@@ -333,10 +333,13 @@ declare namespace Api {
 
     /** 截帧返回 */
     type CaptureResult = {
-      imageId: number;
+      id: number;
       filename: string;
-      fileUrl: string;
-      thumbnailUrl: string;
+      file_url: string;
+      thumbnail_url: string;
+      file_size: number;
+      width: number;
+      height: number;
     };
 
     /** 云台控制参数 */
