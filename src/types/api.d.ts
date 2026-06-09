@@ -202,8 +202,11 @@ declare namespace Api {
    * backend api module: "annotation"
    */
   namespace Annotation {
-    /** 标注形状类型 */
+    /** 标注形状类型（前端创建项目时的工具配置，使用 create- 前缀） */
     type ToolType = 'create-box' | 'create-polygon' | 'create-point';
+
+    /** 标注结果中的 type 字段（后端返回可能为短格式 box/polygon/point） */
+    type RegionType = ToolType | 'box' | 'polygon' | 'point';
 
     /** 项目标注分类配置项 */
     type ClassItem = {
@@ -221,6 +224,8 @@ declare namespace Api {
       classes: ClassItem[];
       tags: string[];
       enableComment: boolean;
+      /** 预设注释说明列表，标注时可供快速选择，提高标准化 */
+      commentPresets: string[];
       tools: ToolType[];
       totalImages: number;
       annotatedCount: number;
@@ -238,7 +243,7 @@ declare namespace Api {
     };
 
     /** 创建项目请求参数 */
-    type ProjectCreateParams = Pick<Project, 'projectName' | 'description' | 'classes' | 'tags' | 'enableComment' | 'tools' | 'memberIds' | 'cameraUrl' | 'cameraUsername' | 'cameraPassword'>;
+    type ProjectCreateParams = Pick<Project, 'projectName' | 'description' | 'classes' | 'tags' | 'enableComment' | 'commentPresets' | 'tools' | 'memberIds' | 'cameraUrl' | 'cameraUsername' | 'cameraPassword'>;
 
     /** 项目搜索参数 */
     type ProjectSearchParams = CommonType.RecordNullable<
@@ -293,7 +298,9 @@ declare namespace Api {
 
     /** 标注区域（region）数据 */
     type RegionData = {
-      type: ToolType;
+      id?: string | number;
+      color?: string;
+      type: RegionType;
       cls: string;
       tags: string[];
       comment?: string;
@@ -344,7 +351,7 @@ declare namespace Api {
 
     /** 云台控制参数 */
     type PtzParams = {
-      action: 'left' | 'right' | 'up' | 'down' | 'zoomIn' | 'zoomOut' | 'stop';
+      action: 'left' | 'right' | 'up' | 'down' | 'zoomIn' | 'zoomOut' | 'focusIn' | 'focusOut' | 'irisIn' | 'irisOut' | 'stop';
       speed?: number;
       duration?: number;
     };

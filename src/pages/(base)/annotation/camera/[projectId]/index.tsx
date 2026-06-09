@@ -118,6 +118,11 @@ const CameraCapture = () => {
     sendPtz(action, { duration: 500 });
   };
 
+  // 聚焦/光圈单击：duration=500，后端自动停止
+  const handleLens = (action: 'focusIn' | 'focusOut' | 'irisIn' | 'irisOut') => {
+    sendPtz(action, { duration: 500 });
+  };
+
   // 截取当前帧
   const handleCapture = async () => {
     if (!connected || capturing) {
@@ -156,12 +161,14 @@ const CameraCapture = () => {
   // 关闭连接
   const handleDisconnect = () => {
     stopH264Player();
+    setShouldStartPlayer(false);
     setConnected(null);
     setDeviceName('');
     setResolutions([]);
     setCurrentResolution(null);
     setCaptures([]);
     ptzActiveRef.current = null;
+    setPtzActive(null);
   };
 
   // 返回图片采集页
@@ -191,6 +198,8 @@ const CameraCapture = () => {
       onStatusChange: (status) => {
         if (status === 'connected') {
           setConnected(true);
+        } else if (status === 'disconnected') {
+          setConnected(false);
         }
       }
     });
@@ -206,24 +215,31 @@ const CameraCapture = () => {
     setShouldStartPlayer(false);
   }, []);
 
-  // 监听 shouldStartPlayer 状态，在下一帧启动播放器（确保 DOM 就绪）
+  // 监听 shouldStartPlayer 状态，延迟启动播放器确保 video 元素已就绪
   useEffect(() => {
     if (!shouldStartPlayer) {
       return;
     }
-    // 使用 requestAnimationFrame 确保 video 元素已挂载
-    const raf = requestAnimationFrame(() => {
+    // 延迟 100ms 确保之前的 destroy() 中的 video.src='' + load() 已完成
+    const timer = setTimeout(() => {
       startH264Player();
-    });
-    return () => cancelAnimationFrame(raf);
+    }, 100);
+    return () => clearTimeout(timer);
   }, [shouldStartPlayer, startH264Player]);
 
-  // 组件卸载时清理
+  // 组件卸载时清理（含页面刷新）
   useEffect(() => {
-    return () => {
-      stopH264Player();
+    const cleanup = () => {
+      // 同步执行 destroy，确保在页面销毁前发送 stop_stream 和 disconnect
+      playerRef.current?.destroy();
+      playerRef.current = null;
     };
-  }, [stopH264Player]);
+    window.addEventListener('beforeunload', cleanup);
+    return () => {
+      window.removeEventListener('beforeunload', cleanup);
+      cleanup();
+    };
+  }, []);
 
   return (
     <div className="h-full flex-col overflow-hidden">
@@ -273,7 +289,61 @@ const CameraCapture = () => {
           </div>
         )}
         <div className="flex flex-1 gap-16px overflow-hidden p-16px">
-          {/* 左侧：实时预览 */}
+          {/* 左侧：采集记录（单列，可滚动） */}
+          {captures.length > 0 && (
+            <div className="w-120px flex-col shrink-0 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-8px">
+              <div className="text-text-secondary shrink-0 border-b border-[var(--ant-color-border-secondary)] px-8px py-6px text-12px">
+                {t('page.annotation.camera.captureRecords')} · {captures.length}
+              </div>
+              <div className="flex-col flex-1 gap-4px overflow-y-auto p-6px">
+                {captures.map((cap, idx) => {
+                  const rawUrl = cap.thumbnail_url || cap.file_url;
+                  const imgSrc = resolveImageUrl(rawUrl);
+                  const fullUrl = resolveImageUrl(cap.file_url);
+                  return (
+                    <APopover
+                      key={cap.id || idx}
+                      content={(
+                        <div className="max-h-400px max-w-400px overflow-auto">
+                          <img
+                            alt={cap.filename || `capture-${idx}`}
+                            className="max-w-full object-contain"
+                            src={fullUrl}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      )}
+                      mouseEnterDelay={0.3}
+                      placement="right"
+                      title={cap.filename || `#${cap.id}`}
+                      trigger="hover"
+                    >
+                      <div className="flex-col shrink-0 cursor-pointer overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-4px">
+                        <div className="relative overflow-hidden bg-gray-100" style={{ aspectRatio: '4/3' }}>
+                          <img
+                            alt={cap.filename || `capture-${idx}`}
+                            className="absolute inset-0 h-full w-full object-cover"
+                            src={imgSrc}
+                            onError={(e) => {
+                              const el = e.target as HTMLImageElement;
+                              el.style.display = 'none';
+                            }}
+                          />
+                        </div>
+                        <div className="text-text-tertiary truncate p-2px text-center text-10px leading-tight">
+                          {cap.filename || `#${cap.id}`}
+                        </div>
+                      </div>
+                    </APopover>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 中间：实时预览 */}
           <div className="flex-col flex-1 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-8px bg-black">
             <div className="flex-center flex-1 overflow-hidden">
               {connected ? (
@@ -357,32 +427,64 @@ const CameraCapture = () => {
             </ACard>
 
             {/* 变焦控制 */}
-            <ACard
-              size="small"
-              title={t('page.annotation.camera.zoom')}
-            >
-              <AFlex
-                gap={8}
-                vertical
+            <AFlex gap={4}>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleZoom('zoomIn')}
               >
-                <AButton
-                  block
-                  disabled={!connected}
-                  icon={<IconIcBaselineAdd />}
-                  onClick={() => handleZoom('zoomIn')}
-                >
-                  {t('page.annotation.camera.zoomIn')}
-                </AButton>
-                <AButton
-                  block
-                  disabled={!connected}
-                  icon={<IconIcBaselineRemove />}
-                  onClick={() => handleZoom('zoomOut')}
-                >
-                  {t('page.annotation.camera.zoomOut')}
-                </AButton>
-              </AFlex>
-            </ACard>
+                {t('page.annotation.camera.zoom')}+
+              </AButton>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleZoom('zoomOut')}
+              >
+                {t('page.annotation.camera.zoom')}-
+              </AButton>
+            </AFlex>
+
+            {/* 聚焦控制 */}
+            <AFlex gap={4}>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('focusIn')}
+              >
+                {t('page.annotation.camera.focus')}+
+              </AButton>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('focusOut')}
+              >
+                {t('page.annotation.camera.focus')}-
+              </AButton>
+            </AFlex>
+
+            {/* 光圈控制 */}
+            <AFlex gap={4}>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('irisIn')}
+              >
+                {t('page.annotation.camera.iris')}+
+              </AButton>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('irisOut')}
+              >
+                {t('page.annotation.camera.iris')}-
+              </AButton>
+            </AFlex>
 
             {/* 分辨率 */}
             {resolutions.length > 0 && (
@@ -416,46 +518,6 @@ const CameraCapture = () => {
             </AButton>
           </div>
         </div>
-
-        {/* 底部采集记录 — 最大高度占剩余空间 1/8 */}
-        {captures.length > 0 && (
-          <div className="flex-col border-t border-[var(--ant-color-border-secondary)] px-16px py-8px" style={{ maxHeight: '12.5%', minHeight: '80px' }}>
-            <div className="text-text-secondary mb-8px shrink-0 text-12px">
-              {t('page.annotation.camera.captureRecords')} · {t('common.total')}: {captures.length}
-            </div>
-            <div className="flex flex-1 items-stretch gap-8px overflow-x-auto pb-4px" style={{ minHeight: 0 }}>
-              {captures.map((cap, idx) => {
-                const rawUrl = cap.thumbnail_url || cap.file_url;
-                const imgSrc = resolveImageUrl(rawUrl);
-                return (
-                  <div
-                    key={cap.id || idx}
-                    className="flex-col shrink-0 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-4px"
-                    style={{ width: 'auto', maxWidth: '120px' }}
-                  >
-                    <div className="relative flex-shrink-0 overflow-hidden bg-gray-100" style={{ aspectRatio: '4/3', height: '100%', width: 'auto' }}>
-                      <img
-                        alt={cap.filename || `capture-${idx}`}
-                        className="absolute inset-0 h-full w-full object-cover"
-                        src={imgSrc}
-                        onError={(e) => {
-                          const el = e.target as HTMLImageElement;
-                          el.style.display = 'none';
-                        }}
-                      />
-                      <div className="text-text-tertiary pointer-events-none absolute inset-0 flex items-center justify-center text-10px">
-                        {cap.filename || `#${cap.id}`}
-                      </div>
-                    </div>
-                    <div className="text-text-tertiary truncate p-2px text-center text-10px leading-tight">
-                      {cap.filename || `#${cap.id}`}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

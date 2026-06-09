@@ -41,3 +41,10 @@ html.grayscale {
 .dark::view-transition-new(root) {
   z-index: 9999;
 }
+
+/* ========== 修复标注图片缩放失真 ========== */
+/* reset.css 中 img { max-width: 100% } 会导致缩放后图片宽度被容器限制 */
+/* 但高度由 inline style 控制，造成宽高比失调 */
+.annotate-root img {
+  max-width: none !important;
+}

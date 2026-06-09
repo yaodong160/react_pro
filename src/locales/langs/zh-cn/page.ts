@@ -409,6 +409,9 @@
       classes: '标注分类',
       tags: '图片标签',
       enableComment: '启用注释',
+      commentPresets: '预设注释',
+      commentPresetsTip: '每行一个，标注时可快速选择',
+      commentPresetsPlaceholder: '请输入预设注释文本，每行一个',
       tools: '标注工具',
       status: '状态',
       totalImages: '图片总数',
@@ -484,10 +487,16 @@
       zoom: '变焦',
       zoomIn: '放大',
       zoomOut: '缩小',
+      focus: '聚焦',
+      focusIn: '聚焦+',
+      focusOut: '聚焦-',
+      iris: '光圈',
+      irisIn: '光圈+',
+      irisOut: '光圈-',
       resolution: '分辨率',
       capture: '截取当前帧',
       captureSuccess: '截帧成功',
-      captureRecords: '本次采集记录'
+      captureRecords: '采集记录'
     },
     annotate: {
       title: '标注工作台',
@@ -495,7 +504,8 @@
       saveAndNext: '保存并下一张',
       saveSuccess: '保存成功',
       noImages: '该项目暂无图片，请先上传图片',
-      taskDescription: '请根据项目配置的类别和标签进行标注'
+      taskDescription: '请根据项目配置的类别和标签进行标注',
+      collapse: '收起'
     }
   }
 };
