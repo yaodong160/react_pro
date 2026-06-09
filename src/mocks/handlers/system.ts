@@ -475,6 +475,7 @@ const mockProjects: Api.Annotation.Project[] = [
     ],
     tags: ['白天', '夜晚', '雨天'],
     enableComment: true,
+    commentPresets: ['目标被遮挡', '目标不完整', '光照不足导致无法识别', '标注框需调整', '疑似误标，需复审'],
     tools: ['create-box', 'create-polygon'],
     totalImages: 5,
     annotatedCount: 2,
@@ -500,6 +501,7 @@ const mockProjects: Api.Annotation.Project[] = [
     ],
     tags: ['正脸', '侧脸', '戴眼镜'],
     enableComment: false,
+    commentPresets: [],
     tools: ['create-point'],
     totalImages: 5,
     annotatedCount: 2,
@@ -807,7 +809,7 @@ export const cameraHandlers = [
     return HttpResponse.json({
       code: 0,
       message: '摄像头连接正常',
-      data: { deviceName: `DS-2CD2T47G2-L (项目${projectId})` }
+      data: { connected: true, deviceName: `DS-2CD2T47G2-L (项目${projectId})` }
     });
   }),
 
@@ -829,10 +831,13 @@ export const cameraHandlers = [
     return HttpResponse.json({
       code: 0,
       data: {
-        imageId: cameraCaptureIdCounter,
+        id: cameraCaptureIdCounter,
         filename,
-        fileUrl,
-        thumbnailUrl
+        file_url: fileUrl,
+        thumbnail_url: thumbnailUrl,
+        file_size: 123456,
+        width: 1920,
+        height: 1080
       }
     });
   }),

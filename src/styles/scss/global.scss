@@ -1,1 +1,108 @@
 @forward 'scrollbar';
+
+// ========== 标注区域编辑器：折叠面板样式 ==========
+
+// 触发按钮：三圆点图标，点击展开编辑面板
+.region-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  user-select: none;
+  overflow: visible;
+  pointer-events: auto;
+
+  &:hover {
+    background: rgba(255, 255, 255, 1);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+    border-color: rgba(0, 0, 0, 0.35);
+  }
+}
+
+// 三个圆点
+.region-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #666;
+  flex-shrink: 0;
+}
+
+// 展开态面板
+.region-expanded-panel {
+  position: relative;
+  z-index: 20;
+  min-width: 180px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+// 面板顶部栏：分类名称 + 收起按钮
+.region-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.region-panel-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+// 收起按钮：不透明，上三角箭头
+.region-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  &:active {
+    background: rgba(0, 0, 0, 0.12);
+  }
+}
+
+// 上三角箭头（CSS 三角形）
+.region-collapse-arrow {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 6px solid #666;
+}
+
+// Select 输入区域
+.region-selects {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px;
+
+  .ant-select {
+    border-radius: 0;
+  }
+}

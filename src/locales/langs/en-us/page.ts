@@ -398,6 +398,9 @@
       classes: 'Classes',
       tags: 'Tags',
       enableComment: 'Enable Comment',
+      commentPresets: 'Comment Presets',
+      commentPresetsTip: 'One per line, selectable during annotation',
+      commentPresetsPlaceholder: 'Enter preset comments, one per line',
       tools: 'Tools',
       status: 'Status',
       totalImages: 'Total Images',
@@ -473,6 +476,12 @@
       zoom: 'Zoom',
       zoomIn: 'Zoom In',
       zoomOut: 'Zoom Out',
+      focus: 'Focus',
+      focusIn: 'Focus +',
+      focusOut: 'Focus -',
+      iris: 'Iris',
+      irisIn: 'Iris +',
+      irisOut: 'Iris -',
       resolution: 'Resolution',
       capture: 'Capture Frame',
       captureSuccess: 'Frame captured successfully',
@@ -484,7 +493,8 @@
       saveAndNext: 'Save & Next',
       saveSuccess: 'Saved Successfully',
       noImages: 'No images in this project, please upload images first',
-      taskDescription: 'Please annotate according to the project classes and tags'
+      taskDescription: 'Please annotate according to the project classes and tags',
+      collapse: 'Collapse'
     }
   }
 };

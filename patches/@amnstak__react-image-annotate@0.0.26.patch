@@ -1,89 +1,106 @@
 diff --git a/dist/ImageViewer.js b/dist/ImageViewer.js
-index 4fbfd712b59c18f3280a17a41e4892dfa726bff7..03798afe4ebeebc712e6d861c196ffbb98c32ef8 100644
+index 4fbfd712b59c18f3280a17a41e4892dfa726bff7..0000000000000000000000000000000000000000 100644
 --- a/dist/ImageViewer.js
 +++ b/dist/ImageViewer.js
-@@ -19,9 +19,20 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
-   dragging: L
+@@ -2,7 +2,12 @@ import { useRef as S, useLayoutEffect as ee, useState as ae, useEffect as ne, cr
+ import { jsx as W, jsxs as $ } from "react/jsx-runtime";
+ import { m as q, g as fe, t as xe, b as Y, c as de, d as pe, P as te, R as ge, I as ye, f as ve, h as be, u as we } from "./index-BLVsk0vl.js";
+ import { x as ie, c as me, T as Me } from "./Portal-IhUi94Sd.js";
+-const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
++const Te = (layoutParams) => {
++  if (layoutParams && layoutParams.iw && layoutParams.canvasWidth) {
++    return q.Matrix.from(1, 0, 0, 1, -(layoutParams.canvasWidth - layoutParams.iw) / 2, -(layoutParams.canvasHeight - layoutParams.ih) / 2);
++  }
++  return q.Matrix.from(1, 0, 0, 1, -10, -10);
++}, Ee = ({
+   canvasEl: u,
+   changeMat: l,
+   changeDragging: g,
+@@ -23,9 +28,18 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
  }) => {
    const c = S({ x: 0, y: 0 }), I = S({ x: 0, y: 0 }), j = (e, t) => {
 -    const [o, x] = [t.x, t.y];
 -    let h = typeof e == "object" ? e.to / r.a : 1 + 0.2 * e;
 -    r.translate(o, x).scaleU(h), r.a > 2 && r.scaleU(2 / r.a), r.a < 0.05 && r.scaleU(0.05 / r.a), r.translate(-o, -x), l(r.clone());
-+    // 以鼠标在画布上的位置为缩放中心
 +    const [mx, my] = [t.x, t.y];
-+    let targetScale = typeof e == "object" ? e.to / r.a : 1 + 0.1 * e;
-+    // 限制缩放范围
-+    const currentScale = r.a;
-+    const newScale = currentScale * targetScale;
-+    if (newScale > 2) targetScale = 2 / currentScale;
-+    if (newScale < 0.05) targetScale = 0.05 / currentScale;
-+    // 获取当前鼠标位置的图像坐标，确保缩放后该点不动
-+    const invMat = r.clone().inverse();
-+    const imgPt = invMat.applyToPoint(mx, my);
-+    // 缩放：先平移使图像点对齐到鼠标，再缩放，再平移回去
-+    r.translate(mx, my).scaleU(targetScale).translate(-mx, -my);
++    const oldScale = r.a;
++    let targetScale = typeof e == "object" ? e.to / oldScale : 1 + 0.1 * e;
++    const newScale = oldScale * targetScale;
++    if (newScale > 3) targetScale = 3 / oldScale;
++    if (newScale < 0.05) targetScale = 0.05 / oldScale;
++    // Keep the point under the mouse fixed during zoom
++    r.a *= targetScale;
++    r.d *= targetScale;
++    r.e = r.e + mx * oldScale * (1 - targetScale);
++    r.f = r.f + my * oldScale * (1 - targetScale);
 +    l(r.clone());
    };
    return { mouseEvents: {
      onMouseMove: (e) => {
-@@ -85,6 +96,7 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
-       }
-     },
-     onWheel: (e) => {
-+      e.preventDefault();
-       const t = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
-       j(t, c.current);
-     },
-@@ -281,7 +293,7 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
-       style: {
-         width: "100%",
-         height: "100%",
--        maxHeight: "calc(100vh - 68px)",
-+        maxHeight: "none",
-         position: "relative",
-         overflow: "hidden",
-         cursor: o ? "grabbing" : "grab"
+@@ -72,7 +86,7 @@ const Te = () => q.Matrix.from(1, 0, 0, 1, -10, -10), Ee = ({
+           );
+           M < 0.05 && (M = 0.05), M > 10 && (M = 10);
+-          const B = Te().translate(s.x, s.y).scaleU(M);
++          const B = Te(n.current).translate(s.x, s.y).scaleU(M);
+           l(B.clone());
+         }
+         v(null), a(null);
 diff --git a/dist/lib.js b/dist/lib.js
-index acd3e2accddab5519c664052b047c3b5e9362e46..99e68c60dd869863c5b136e7cd04683c01bb3489 100644
+index acd3e2accddab5519c664052b047c3b5e9362e46..0000000000000000000000000000000000000000 100644
 --- a/dist/lib.js
 +++ b/dist/lib.js
-@@ -4122,9 +4122,18 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
-   dragging: g
+@@ -4105,7 +4105,12 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
+         left: 0
+       }
+     )
+-] })), kH = () => r1.Matrix.from(1, 0, 0, 1, -10, -10), SH = ({
++] })), kH = (layoutParams) => {
++  if (layoutParams && layoutParams.iw && layoutParams.canvasWidth) {
++    return r1.Matrix.from(1, 0, 0, 1, -(layoutParams.canvasWidth - layoutParams.iw) / 2, -(layoutParams.canvasHeight - layoutParams.ih) / 2);
++  }
++  return r1.Matrix.from(1, 0, 0, 1, -10, -10);
++}, SH = ({
+   canvasEl: e,
+   changeMat: t,
+   changeDragging: n,
+@@ -4126,9 +4131,19 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
  }) => {
    const k = li({ x: 0, y: 0 }), S = li({ x: 0, y: 0 }), O = (A, T) => {
 -    const [L, K] = [T.x, T.y];
 -    let N = typeof A == "object" ? A.to / d.a : 1 + 0.2 * A;
 -    d.translate(L, K).scaleU(N), d.a > 2 && d.scaleU(2 / d.a), d.a < 0.05 && d.scaleU(0.05 / d.a), d.translate(-L, -K), t(d.clone());
 +    const [mx, my] = [T.x, T.y];
-+    let targetScale = typeof A == "object" ? A.to / d.a : 1 + 0.1 * A;
-+    const currentScale = d.a;
-+    const newScale = currentScale * targetScale;
-+    var maxScale = 3;
-+    if (l.current && l.current.iw && l.current.canvasWidth) {
-+      var computedMax = l.current.canvasWidth / l.current.iw;
-+      maxScale = computedMax > 3 ? 3 : (computedMax > 1.5 ? computedMax : 1.5);
-+    }
-+    if (newScale > maxScale) { targetScale = maxScale / currentScale; }
-+    if (newScale < 0.05) targetScale = 0.05 / currentScale;
-+    d.translate(mx, my).scaleU(targetScale).translate(-mx, -my);
++    const oldScale = d.a;
++    let targetScale = typeof A == "object" ? A.to / oldScale : 1 + 0.1 * A;
++    const newScale = oldScale * targetScale;
++    // Clamp scale range
++    if (newScale > 3) targetScale = 3 / oldScale;
++    if (newScale < 0.05) targetScale = 0.05 / oldScale;
++    // Keep the point under the mouse fixed during zoom:
++    // new_e = old_e + mx * oldScale * (1 - targetScale)
++    d.a *= targetScale;
++    d.d *= targetScale;
++    d.e = d.e + mx * oldScale * (1 - targetScale);
++    d.f = d.f + my * oldScale * (1 - targetScale);
 +    t(d.clone());
    };
    return { mouseEvents: {
      onMouseMove: (A) => {
-@@ -4192,6 +4203,7 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
-       }
-     },
-     onWheel: (A) => {
-+      A.preventDefault();
-       const T = A.deltaY > 0 ? 1 : A.deltaY < 0 ? -1 : 0;
-       O(T, k.current);
-     },
-@@ -4715,7 +4727,7 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
-       style: {
-         width: "100%",
-         height: "100%",
--        maxHeight: "calc(100vh - 68px)",
-+        maxHeight: "none",
-         position: "relative",
-         overflow: "hidden",
-         cursor: d ? "crosshair" : de ? "grabbing" : u ? "grab" : f ? lt.a < 1 ? "zoom-out" : "zoom-in" : void 0
+@@ -4179,7 +4194,7 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
+           );
+           W < 0.05 && (W = 0.05), W > 10 && (W = 10);
+-          const ne = kH().translate(r.x, r.y).scaleU(W);
++          const ne = kH(l.current).translate(r.x, r.y).scaleU(W);
+           t(ne.clone());
+         }
+         i(null), a(null);
+@@ -4559,7 +4574,10 @@ const Mu = /* @__PURE__ */ ga(gH), yH = $r(), mH = Ls.create({
+   }
+ }), $v = (e = null, t = null) => {
+   let n = r1.Matrix.from(1, 0, 0, 1, -10, -10);
++  if (t != null && t.iw && t.canvasWidth) {
++    n = r1.Matrix.from(1, 0, 0, 1, -(t.canvasWidth - t.iw) / 2, -(t.canvasHeight - t.ih) / 2);
++  }
+   return e && (t != null && t.iw) && (n = n.translate(e.x * t.iw, e.y * t.ih).scaleU(e.w + 0.05)), n;
+ }, $H = ({
+   regions: e,

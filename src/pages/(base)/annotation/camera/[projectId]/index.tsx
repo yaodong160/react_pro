@@ -10,7 +10,7 @@
 
 import { fetchCameraCapture, fetchCameraCheck, fetchCameraPtz, fetchCameraResolutions, fetchSetCameraResolution } from '@/services/api';
 import { globalConfig } from '@/config';
-import { localStg } from '@/utils/storage';
+import { H264Player } from '@/utils/h264-player';
 
 /** 将后端返回的相对路径拼接为完整图片URL */
 function resolveImageUrl(url: string) {
@@ -37,7 +37,7 @@ const CameraCapture = () => {
 
   // 云台控制
   const [ptzActive, setPtzActive] = useState<string | null>(null);
-  const ptzTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ptzActiveRef = useRef<string | null>(null);
 
   // 分辨率
   const [resolutions, setResolutions] = useState<Api.Camera.Resolution[]>([]);
@@ -54,11 +54,17 @@ const CameraCapture = () => {
     setConnectError('');
     try {
       const res = await fetchCameraCheck(projectId);
-      setConnected(true);
+      const isConnected = res.data?.connected ?? false;
+      setConnected(isConnected);
       setDeviceName(res.data?.deviceName || '');
-      // 连通后加载分辨率
-      loadResolutions();
+      if (isConnected) {
+        loadResolutions();
+        setShouldStartPlayer(true);
+      } else {
+        setConnectError(t('page.annotation.camera.connectFailed'));
+      }
     } catch (e: any) {
+      console.error('[Camera] checkConnection 异常:', e);
       setConnected(false);
       setConnectError(e?.message || t('common.error'));
     } finally {
@@ -79,54 +85,42 @@ const CameraCapture = () => {
     }
   };
 
-  // 清理云台定时器
-  useEffect(() => {
-    return () => {
-      if (ptzTimerRef.current) {
-        clearInterval(ptzTimerRef.current);
-      }
-    };
-  }, []);
-
   // 发送云台指令
-  const sendPtz = async (action: string, isContinuous = false) => {
-    const params: Api.Camera.PtzParams = {
-      action: action as Api.Camera.PtzParams['action'],
-      speed: 5
-    };
-    if (!isContinuous && (action === 'zoomIn' || action === 'zoomOut')) {
-      params.duration = 500;
-    }
-    try {
-      await fetchCameraPtz(projectId, params);
-    } catch {
-      // ignore
-    }
+  const sendPtz = (action: string, params?: Partial<Api.Camera.PtzParams>) => {
+    fetchCameraPtz(projectId, { action: action as Api.Camera.PtzParams['action'], speed: 5, ...params })
+      .catch((e: any) => {
+        console.warn('[PTZ] 请求失败:', action, e?.message);
+      });
   };
 
-  // 云台按钮按下（长按连续移动）
+  // 方向键按下：duration=0，后端持续移动不阻塞
   const handlePtzDown = (action: string) => {
+    if (ptzActiveRef.current === action) {
+      return;
+    }
+    ptzActiveRef.current = action;
     setPtzActive(action);
-    sendPtz(action, true);
-    // 持续发送，每 200ms 一次
-    ptzTimerRef.current = setInterval(() => {
-      sendPtz(action, true);
-    }, 200);
+    sendPtz(action, { duration: 0 });
   };
 
-  // 云台按钮松开
+  // 方向键松开：发 stop
   const handlePtzUp = () => {
-    setPtzActive(null);
-    if (ptzTimerRef.current) {
-      clearInterval(ptzTimerRef.current);
-      ptzTimerRef.current = null;
+    if (!ptzActiveRef.current) {
+      return;
     }
+    ptzActiveRef.current = null;
+    setPtzActive(null);
     sendPtz('stop');
   };
 
-  // 变焦点击
+  // 变焦单击：duration=500，后端自动停止
   const handleZoom = (action: 'zoomIn' | 'zoomOut') => {
-    sendPtz(action);
+    sendPtz(action, { duration: 500 });
+  };
+
+  // 聚焦/光圈单击：duration=500，后端自动停止
+  const handleLens = (action: 'focusIn' | 'focusOut' | 'irisIn' | 'irisOut') => {
+    sendPtz(action, { duration: 500 });
   };
 
   // 截取当前帧
@@ -138,10 +132,15 @@ const CameraCapture = () => {
     try {
       const res = await fetchCameraCapture(projectId);
       if (res.data) {
-        setCaptures(prev => [res.data!, ...prev]);
+        const captureData = res.data;
+        setCaptures(prev => [captureData, ...prev]);
         window.$message?.success(t('page.annotation.camera.captureSuccess'));
+      } else {
+        console.warn('[Camera] capture 返回空数据, error:', res.error);
+        window.$message?.error(t('common.error'));
       }
-    } catch {
+    } catch (e: any) {
+      console.error('[Camera] capture 异常:', e);
       window.$message?.error(t('common.error'));
     } finally {
       setCapturing(false);
@@ -161,15 +160,15 @@ const CameraCapture = () => {
 
   // 关闭连接
   const handleDisconnect = () => {
+    stopH264Player();
+    setShouldStartPlayer(false);
     setConnected(null);
     setDeviceName('');
     setResolutions([]);
     setCurrentResolution(null);
     setCaptures([]);
-    if (ptzTimerRef.current) {
-      clearInterval(ptzTimerRef.current);
-      ptzTimerRef.current = null;
-    }
+    ptzActiveRef.current = null;
+    setPtzActive(null);
   };
 
   // 返回图片采集页
@@ -177,128 +176,70 @@ const CameraCapture = () => {
     nav('/annotation/collect');
   };
 
-  // MJPEG 预览 - 通过 fetch 带 token 获取流，逐帧渲染
-  const imgRef = useRef<HTMLImageElement>(null);
-  const mjpegAbortRef = useRef<AbortController | null>(null);
+  // H.264 视频播放
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<H264Player | null>(null);
+  // 用 state 触发启动，确保在 React 渲染完成（video 元素已挂载）后才执行
+  const [shouldStartPlayer, setShouldStartPlayer] = useState(false);
 
-  useEffect(() => {
-    if (!connected) {
-      // 断开连接时清理
-      if (mjpegAbortRef.current) {
-        mjpegAbortRef.current.abort();
-        mjpegAbortRef.current = null;
-      }
-      if (imgRef.current) {
-        imgRef.current.src = '';
-      }
+  // 启动 H.264 播放（与 connected 状态解耦，避免云台操作导致的短暂断开销毁播放器）
+  const startH264Player = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || playerRef.current) {
       return;
     }
 
-    const abortController = new AbortController();
-    mjpegAbortRef.current = abortController;
-
-    const token = localStg.get('token');
-    const serviceBaseURL = globalConfig.serviceBaseURL;
-
-    fetch(`${serviceBaseURL}/camera/preview/${projectId}`, {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : ''
+    const player = new H264Player({
+      projectId,
+      onError: (msg) => {
+        window.$message?.error(msg);
+        setConnectError(msg);
       },
-      signal: abortController.signal
-    })
-      .then(async (response) => {
-        if (!response.ok || !response.body) {
-          console.error('[Camera] MJPEG fetch failed:', response.status);
-          return;
-        }
-
-        const contentType = response.headers.get('content-type') || '';
-        const reader = response.body.getReader();
-
-        // 如果是 MJPEG 流 (multipart/x-mixed-replace)，逐帧解析
-        if (contentType.includes('multipart/x-mixed-replace')) {
-          const boundary = contentType.match(/boundary=([^;]+)/)?.[1] || '';
-          const boundaryBuffer = new TextEncoder().encode(`--${boundary}`);
-          let buffer = new Uint8Array(0);
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              break;
-            }
-
-            // 拼接 buffer
-            const newBuffer = new Uint8Array(buffer.length + value.length);
-            newBuffer.set(buffer);
-            newBuffer.set(value, buffer.length);
-            buffer = newBuffer;
-
-            // 查找完整帧（以 boundary 分隔）
-            let startIdx = 0;
-            while (startIdx < buffer.length) {
-              const boundaryIdx = indexOf(buffer, boundaryBuffer, startIdx + boundaryBuffer.length);
-              if (boundaryIdx === -1) {
-                break;
-              }
-
-              // 提取两 boundary 之间的数据
-              const frameData = buffer.slice(startIdx, boundaryIdx);
-
-              // 查找 JPEG 数据起始 (headers 后空行)
-              const jpegStart = indexOf(frameData, new Uint8Array([0xFF, 0xD8]));
-              if (jpegStart !== -1) {
-                const blob = new Blob([frameData.slice(jpegStart)], { type: 'image/jpeg' });
-                const url = URL.createObjectURL(blob);
-                if (imgRef.current) {
-                  const prevUrl = imgRef.current.src;
-                  imgRef.current.src = url;
-                  // 释放上一个 blob URL
-                  if (prevUrl && prevUrl.startsWith('blob:')) {
-                    URL.revokeObjectURL(prevUrl);
-                  }
-                }
-              }
-
-              startIdx = boundaryIdx;
-            }
-
-            // 保留未完成的数据
-            if (startIdx > 0) {
-              buffer = buffer.slice(startIdx);
-            }
-          }
-        } else {
-          // 单张图片 (如 mock 模式)
-          const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
-          if (imgRef.current) {
-            imgRef.current.src = url;
-          }
-        }
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.error('[Camera] MJPEG stream error:', err);
-        }
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [connected, projectId]);
-
-  // 辅助函数：在 Uint8Array 中查找子数组
-  function indexOf(haystack: Uint8Array, needle: Uint8Array, fromIndex = 0) {
-    outer: for (let i = fromIndex; i <= haystack.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) {
-        if (haystack[i + j] !== needle[j]) {
-          continue outer;
+      onStatusChange: (status) => {
+        if (status === 'connected') {
+          setConnected(true);
+        } else if (status === 'disconnected') {
+          setConnected(false);
         }
       }
-      return i;
+    });
+
+    player.attach(video);
+    playerRef.current = player;
+  }, [projectId]);
+
+  // 停止 H.264 播放
+  const stopH264Player = useCallback(() => {
+    playerRef.current?.destroy();
+    playerRef.current = null;
+    setShouldStartPlayer(false);
+  }, []);
+
+  // 监听 shouldStartPlayer 状态，延迟启动播放器确保 video 元素已就绪
+  useEffect(() => {
+    if (!shouldStartPlayer) {
+      return;
     }
-    return -1;
-  }
+    // 延迟 100ms 确保之前的 destroy() 中的 video.src='' + load() 已完成
+    const timer = setTimeout(() => {
+      startH264Player();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [shouldStartPlayer, startH264Player]);
+
+  // 组件卸载时清理（含页面刷新）
+  useEffect(() => {
+    const cleanup = () => {
+      // 同步执行 destroy，确保在页面销毁前发送 stop_stream 和 disconnect
+      playerRef.current?.destroy();
+      playerRef.current = null;
+    };
+    window.addEventListener('beforeunload', cleanup);
+    return () => {
+      window.removeEventListener('beforeunload', cleanup);
+      cleanup();
+    };
+  }, []);
 
   return (
     <div className="h-full flex-col overflow-hidden">
@@ -348,13 +289,69 @@ const CameraCapture = () => {
           </div>
         )}
         <div className="flex flex-1 gap-16px overflow-hidden p-16px">
-          {/* 左侧：实时预览 */}
+          {/* 左侧：采集记录（单列，可滚动） */}
+          {captures.length > 0 && (
+            <div className="w-120px flex-col shrink-0 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-8px">
+              <div className="text-text-secondary shrink-0 border-b border-[var(--ant-color-border-secondary)] px-8px py-6px text-12px">
+                {t('page.annotation.camera.captureRecords')} · {captures.length}
+              </div>
+              <div className="flex-col flex-1 gap-4px overflow-y-auto p-6px">
+                {captures.map((cap, idx) => {
+                  const rawUrl = cap.thumbnail_url || cap.file_url;
+                  const imgSrc = resolveImageUrl(rawUrl);
+                  const fullUrl = resolveImageUrl(cap.file_url);
+                  return (
+                    <APopover
+                      key={cap.id || idx}
+                      content={(
+                        <div className="max-h-400px max-w-400px overflow-auto">
+                          <img
+                            alt={cap.filename || `capture-${idx}`}
+                            className="max-w-full object-contain"
+                            src={fullUrl}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      )}
+                      mouseEnterDelay={0.3}
+                      placement="right"
+                      title={cap.filename || `#${cap.id}`}
+                      trigger="hover"
+                    >
+                      <div className="flex-col shrink-0 cursor-pointer overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-4px">
+                        <div className="relative overflow-hidden bg-gray-100" style={{ aspectRatio: '4/3' }}>
+                          <img
+                            alt={cap.filename || `capture-${idx}`}
+                            className="absolute inset-0 h-full w-full object-cover"
+                            src={imgSrc}
+                            onError={(e) => {
+                              const el = e.target as HTMLImageElement;
+                              el.style.display = 'none';
+                            }}
+                          />
+                        </div>
+                        <div className="text-text-tertiary truncate p-2px text-center text-10px leading-tight">
+                          {cap.filename || `#${cap.id}`}
+                        </div>
+                      </div>
+                    </APopover>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 中间：实时预览 */}
           <div className="flex-col flex-1 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-8px bg-black">
             <div className="flex-center flex-1 overflow-hidden">
               {connected ? (
-                <img
-                  ref={imgRef}
-                  alt="Camera Preview"
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
                   className="max-h-full max-w-full object-contain"
                 />
               ) : (
@@ -379,7 +376,10 @@ const CameraCapture = () => {
               size="small"
               title={t('page.annotation.camera.ptzControl')}
             >
-              <div className="flex-col items-center gap-4px">
+              <div
+                className="flex-col items-center gap-4px"
+                onMouseLeave={handlePtzUp}
+              >
                 <AButton
                   disabled={!connected}
                   className={ptzActive === 'up' ? 'colorPrimary' : ''}
@@ -387,7 +387,6 @@ const CameraCapture = () => {
                   size="large"
                   type={ptzActive === 'up' ? 'primary' : 'default'}
                   onMouseDown={() => handlePtzDown('up')}
-                  onMouseLeave={handlePtzUp}
                   onMouseUp={handlePtzUp}
                 />
                 <div className="flex gap-4px">
@@ -398,7 +397,6 @@ const CameraCapture = () => {
                     size="large"
                     type={ptzActive === 'left' ? 'primary' : 'default'}
                     onMouseDown={() => handlePtzDown('left')}
-                    onMouseLeave={handlePtzUp}
                     onMouseUp={handlePtzUp}
                   />
                   <AButton
@@ -413,7 +411,6 @@ const CameraCapture = () => {
                     size="large"
                     type={ptzActive === 'right' ? 'primary' : 'default'}
                     onMouseDown={() => handlePtzDown('right')}
-                    onMouseLeave={handlePtzUp}
                     onMouseUp={handlePtzUp}
                   />
                 </div>
@@ -424,39 +421,70 @@ const CameraCapture = () => {
                   size="large"
                   type={ptzActive === 'down' ? 'primary' : 'default'}
                   onMouseDown={() => handlePtzDown('down')}
-                  onMouseLeave={handlePtzUp}
                   onMouseUp={handlePtzUp}
                 />
               </div>
             </ACard>
 
             {/* 变焦控制 */}
-            <ACard
-              size="small"
-              title={t('page.annotation.camera.zoom')}
-            >
-              <AFlex
-                gap={8}
-                vertical
+            <AFlex gap={4}>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleZoom('zoomIn')}
               >
-                <AButton
-                  block
-                  disabled={!connected}
-                  icon={<IconIcBaselineAdd />}
-                  onClick={() => handleZoom('zoomIn')}
-                >
-                  {t('page.annotation.camera.zoomIn')}
-                </AButton>
-                <AButton
-                  block
-                  disabled={!connected}
-                  icon={<IconIcBaselineRemove />}
-                  onClick={() => handleZoom('zoomOut')}
-                >
-                  {t('page.annotation.camera.zoomOut')}
-                </AButton>
-              </AFlex>
-            </ACard>
+                {t('page.annotation.camera.zoom')}+
+              </AButton>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleZoom('zoomOut')}
+              >
+                {t('page.annotation.camera.zoom')}-
+              </AButton>
+            </AFlex>
+
+            {/* 聚焦控制 */}
+            <AFlex gap={4}>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('focusIn')}
+              >
+                {t('page.annotation.camera.focus')}+
+              </AButton>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('focusOut')}
+              >
+                {t('page.annotation.camera.focus')}-
+              </AButton>
+            </AFlex>
+
+            {/* 光圈控制 */}
+            <AFlex gap={4}>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('irisIn')}
+              >
+                {t('page.annotation.camera.iris')}+
+              </AButton>
+              <AButton
+                block
+                disabled={!connected}
+                size="small"
+                onClick={() => handleLens('irisOut')}
+              >
+                {t('page.annotation.camera.iris')}-
+              </AButton>
+            </AFlex>
 
             {/* 分辨率 */}
             {resolutions.length > 0 && (
@@ -490,32 +518,6 @@ const CameraCapture = () => {
             </AButton>
           </div>
         </div>
-
-        {/* 底部采集记录 */}
-        {captures.length > 0 && (
-          <div className="border-t border-[var(--ant-color-border-secondary)] px-16px py-8px">
-            <div className="text-text-secondary mb-8px text-12px">
-              {t('page.annotation.camera.captureRecords')} · {t('common.total')}: {captures.length}
-            </div>
-            <div className="flex gap-8px overflow-x-auto">
-              {captures.map((cap, idx) => (
-                <div
-                  key={cap.imageId || idx}
-                  className="w-120px shrink-0 overflow-hidden border border-[var(--ant-color-border-secondary)] rounded-4px"
-                >
-                  <img
-                    alt={cap.filename}
-                    className="aspect-4/3 w-full object-cover"
-                    src={resolveImageUrl(cap.thumbnailUrl || cap.fileUrl)}
-                  />
-                  <div className="text-text-tertiary truncate p-4px text-center text-10px">
-                    {cap.filename}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

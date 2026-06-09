@@ -138,7 +138,14 @@ const ProjectManage = () => {
               <AButton
                 size="small"
                 type="primary"
-                onClick={() => handleEdit(record.id)}
+                onClick={() => {
+                  // 编辑回显时把 commentPresets 数组转为多行文本
+                  const recordForEdit = { ...record };
+                  if (Array.isArray(record.commentPresets)) {
+                    recordForEdit.commentPresets = record.commentPresets.join('\n');
+                  }
+                  handleEdit(recordForEdit);
+                }}
               >
                 {t('common.edit')}
               </AButton>
@@ -170,13 +177,19 @@ const ProjectManage = () => {
         // 校验至少有一项配置
         const classes = (res.classes || []).filter((c: any) => c.name);
         const tags = (res.tags || []).filter((t: any) => t);
-        const hasConfig = classes.length > 0 || tags.length > 0 || res.enableComment;
+        const commentPresets = (res.commentPresets || '').split('\n').filter((c: string) => c.trim());
+        const hasConfig = classes.length > 0 || tags.length > 0 || res.enableComment || commentPresets.length > 0;
         if (!hasConfig) {
           window.$message?.warning(t('page.annotation.project.form.configRequired'));
           throw new Error('configRequired');
         }
+        // 将 commentPresets 从多行文本转为数组
+        res.commentPresets = commentPresets;
         await fetchAddProject(res);
       } else {
+        // 编辑时同样转换
+        const commentPresets = (res.commentPresets || '').split('\n').filter((c: string) => c.trim());
+        res.commentPresets = commentPresets;
         await fetchEditProject(editingData!.id, res);
       }
     }

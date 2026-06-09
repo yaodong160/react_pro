@@ -185,6 +185,17 @@ const ProjectOperateDrawer: FC<Page.OperateDrawerProps> = ({ form, handleSubmit,
           <ASwitch />
         </AForm.Item>
 
+        <AForm.Item
+          label={t('page.annotation.project.commentPresets')}
+          name="commentPresets"
+          tooltip={t('page.annotation.project.commentPresetsTip')}
+        >
+          <AInput.TextArea
+            autoSize={{ minRows: 2, maxRows: 6 }}
+            placeholder={t('page.annotation.project.commentPresetsPlaceholder')}
+          />
+        </AForm.Item>
+
         <ADivider orientation="left" plain>
           {t('page.annotation.project.cameraConfig')}
         </ADivider>

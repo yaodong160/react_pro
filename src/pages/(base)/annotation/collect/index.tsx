@@ -256,19 +256,35 @@ const ImageCollect = () => {
                 hoverable
                 size="small"
               >
-                <div className="relative">
-                  <img
-                    alt={img.imageName}
-                    className="aspect-4/3 w-full object-cover"
-                    src={resolveImageUrl(img.imageUrl)}
-                  />
-                  <ATag
-                    className="absolute right-4px top-4px"
-                    color={statusTagMap[img.annotateStatus]}
-                  >
-                    {t(`page.annotation.image.${img.annotateStatus}`)}
-                  </ATag>
-                </div>
+                <APopover
+                  content={(
+                    <div className="max-h-500px max-w-500px overflow-auto">
+                      <img
+                        alt={img.imageName}
+                        className="max-w-full object-contain"
+                        src={resolveImageUrl(img.imageUrl)}
+                      />
+                    </div>
+                  )}
+                  mouseEnterDelay={0.3}
+                  placement="right"
+                  title={img.imageName}
+                  trigger="hover"
+                >
+                  <div className="relative cursor-pointer">
+                    <img
+                      alt={img.imageName}
+                      className="aspect-4/3 w-full object-cover"
+                      src={resolveImageUrl(img.imageUrl)}
+                    />
+                    <ATag
+                      className="absolute right-4px top-4px"
+                      color={statusTagMap[img.annotateStatus]}
+                    >
+                      {t(`page.annotation.image.${img.annotateStatus}`)}
+                    </ATag>
+                  </div>
+                </APopover>
                 <div className="p-8px text-center text-12px">
                   <div className="truncate">{img.imageName}</div>
                   {img.annotator && (

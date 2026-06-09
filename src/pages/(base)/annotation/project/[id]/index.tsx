@@ -81,6 +81,17 @@ const ProjectDetail = () => {
               ))}
             </div>
           </div>
+
+          {project.commentPresets?.length > 0 && (
+            <div>
+              <h4 className="mb-8px text-16px font-bold">{t('page.annotation.project.commentPresets')}</h4>
+              <div className="flex flex-wrap gap-8px">
+                {project.commentPresets.map((preset: string, idx: number) => (
+                  <ATag key={idx}>{preset}</ATag>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </ACard>
     </div>
