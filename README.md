@@ -58,13 +58,7 @@
 - Node.js >= 18.0.0
 - pnpm >= 8.0.0
 
-### 克隆
-
-```bash
-git clone git@github.com:chen-ziwen/chiko-admin.git
-```
-
-### 安装依赖
+### 前端安装
 
 > [!WARNING]
 > 项目采用 pnpm monorepo 管理方式，请勿使用其他包管理工具！
@@ -75,6 +69,122 @@ npm install -g pnpm
 
 # 安装项目依赖
 pnpm install
+```
+
+---
+
+## 后端部署
+
+> 本节说明后端服务的运行环境，前端开发者可跳过。
+
+### 后端环境要求
+
+- Python >= 3.10
+- MySQL >= 5.7
+- **ffmpeg >= 4.0**（摄像头 H.264 预览必需）
+
+### 为什么后端需要 ffmpeg？
+
+浏览器访问海康页面用的是海康自带的 Web 控件（内嵌 H.264 解码器），但我们的系统采用**后端代理架构**：
+
+```
+摄像头 RTSP H.264 → Python后端(ffmpeg转封装) → WebSocket → 浏览器<video>标签
+```
+
+Python 无法直接解码 H.264 裸流，需要 ffmpeg 做**转封装**（将 H.264 从 RTSP 容器格式转为浏览器 `<video>` 标签可识别的 fMP4 格式）。此过程**不重新编码视频**，几乎不消耗 CPU。
+
+### 安装 ffmpeg
+
+**Windows**:
+```powershell
+# 方式一：winget（推荐）
+winget install ffmpeg
+
+# 方式二：手动安装
+# 1. 下载 https://www.gyan.dev/ffmpeg/builds/ → ffmpeg-release-essentials.zip
+# 2. 解压到 C:\ffmpeg
+# 3. 将 C:\ffmpeg\bin 加入系统 PATH 环境变量
+```
+
+**Linux (Ubuntu/Debian)**:
+```bash
+sudo apt update && sudo apt install -y ffmpeg
+```
+
+**Linux (CentOS/RHEL)**:
+```bash
+sudo yum install -y epel-release && sudo yum install -y ffmpeg
+```
+
+**macOS**:
+```bash
+brew install ffmpeg
+```
+
+安装后验证：
+```bash
+ffmpeg -version
+```
+
+### 海康摄像头配置要求
+
+使用摄像头实时预览功能前，请确保摄像头满足以下条件：
+
+**网络要求**：
+- 摄像头与后端服务器网络互通（能 ping 通摄像头 IP）
+- 开放端口：HTTP 80（ISAPI 协议）、RTSP 554（H.264 视频流）
+
+**摄像头配置**（登录摄像头 Web 管理界面）：
+
+1. **启用 ISAPI 协议**（默认已开启）
+   - 路径：配置 → 网络 → 高级配置 → 集成协议
+   - 勾选「启用 ISAPI」
+
+2. **子码流编码设为 H.264**
+   - 路径：配置 → 视音频 → 视频 → 子码流
+   - 视频编码：**H.264**（不要选 H.265 或 MJPEG）
+   - 分辨率建议：704×576 或 1280×720（预览用，分辨率过高会增加带宽和延迟）
+   - 码率上限建议：1024~2048 Kbps
+
+3. **开启 RTSP 取流**
+   - 路径：配置 → 网络 → 高级配置 → RTSP
+   - 勾选「启用 RTSP」
+   - RTSP 端口：554（默认）
+
+4. **创建专用账号**（推荐）
+   - 路径：配置 → 系统 → 用户管理
+   - 添加一个普通用户（无需管理员权限），只需「预览」和「云台控制」权限
+   - 在系统中填写该用户的用户名和密码，避免使用默认 admin 账号
+
+**验证摄像头配置**：
+```bash
+# 测试 ISAPI 连通性
+curl -u username:password http://摄像头IP/ISAPI/System/deviceInfo
+
+# 测试 RTSP 流（用 VLC 或 ffplay）
+ffplay rtsp://username:password@摄像头IP:554/Streaming/Channels/101
+```
+
+### 后端启动
+
+```bash
+# 创建虚拟环境
+python -m venv venv
+
+# 激活虚拟环境
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 数据库迁移
+flask db upgrade
+
+# 启动后端
+python run.py
 ```
 
 ## 项目结构
